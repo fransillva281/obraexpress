@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>ObraExpress - Painel da Loja</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ObraExpress Loja">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+:root{--laranja:#E65100;--laranja-escuro:#BF360C;--bg:#F5F5F5;--branco:#fff;--texto:#212121;--texto-sec:#757575;--borda:#E0E0E0;--verde:#2E7D32}
+body{background:var(--bg);color:var(--texto)}
+.header{background:var(--laranja);color:var(--branco);padding:16px;position:sticky;top:0;z-index:100}
+.header h1{font-size:20px;font-weight:700}
+.header .sub{font-size:12px;opacity:.8}
+.btn{display:block;width:100%;padding:14px;border:none;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer;text-align:center;margin:8px 0}
+.btn-primary{background:var(--laranja);color:var(--branco)}
+.btn-success{background:var(--verde);color:var(--branco)}
+.form-group{margin-bottom:16px;padding:0 16px}
+.form-group label{display:block;font-size:13px;font-weight:600;color:var(--texto-sec);margin-bottom:4px}
+.form-group input,.form-group select,.form-group textarea{width:100%;padding:12px;border:2px solid var(--borda);border-radius:10px;font-size:15px;outline:none}
+.form-group input:focus,.form-group textarea:focus{border-color:var(--laranja)}
+.form-group textarea{resize:vertical;min-height:60px}
+.card{background:var(--branco);margin:8px 16px;padding:16px;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.card h3{font-size:15px;margin-bottom:4px}
+.card .meta{font-size:12px;color:var(--texto-sec)}
+.orders-section{padding:0 16px}
+.order-item{background:var(--branco);margin:8px 0;padding:12px 16px;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.order-item .status{font-size:12px;font-weight:600;padding:2px 8px;border-radius:12px;display:inline-block;margin-bottom:4px}
+.order-item .total{font-size:16px;font-weight:700;color:var(--laranja)}
+.order-item .actions{display:flex;gap:8px;margin-top:8px}
+.order-item .actions button{flex:1;padding:8px;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer}
+.tabs{display:flex;background:var(--branco);margin:12px 16px;border-radius:12px;overflow:hidden}
+.tab{flex:1;padding:12px;text-align:center;font-size:13px;font-weight:600;cursor:pointer;border:none;background:none;color:var(--texto-sec)}
+.tab.active{background:var(--laranja);color:var(--branco)}
+.empty-state{text-align:center;padding:40px 20px;color:var(--texto-sec)}
+.toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:#37474F;color:var(--branco);padding:12px 24px;border-radius:12px;font-size:14px;z-index:999;display:none}
+</style>
+</head>
+<body>
+<div id="toast" class="toast"></div>
+
+<div id="page-login" class="pages active" style="display:block">
+  <div class="header"><h1>🏪 ObraExpress - Loja</h1><div class="sub">Painel do vendedor</div></div>
+  <div style="padding:24px 16px">
+    <div id="login-form">
+      <div class="form-group"><label>Email</label><input type="email" id="login-email" placeholder="loja@email.com"></div>
+      <div class="form-group"><label>Senha</label><input type="password" id="login-senha" placeholder="Sua senha"></div>
+      <button class="btn btn-primary" onclick="loginLoja()">Entrar</button>
+      <div style="text-align:center;padding:16px;font-size:13px;color:var(--texto-sec)">Não tem conta? <a style="color:var(--laranja);font-weight:600;cursor:pointer" onclick="showCadastro()">Cadastre sua loja</a></div>
+    </div>
+    <div id="cadastro-form" style="display:none">
+      <div class="form-group"><label>Nome da Loja</label><input type="text" id="cad-nome" placeholder="Material de Construção do João"></div>
+      <div class="form-group"><label>Email</label><input type="email" id="cad-email" placeholder="loja@email.com"></div>
+      <div class="form-group"><label>Telefone / WhatsApp</label><input type="text" id="cad-telefone" placeholder="(98) 99999-9999"></div>
+      <div class="form-group"><label>Endereço</label><input type="text" id="cad-endereco" placeholder="Rua, número"></div>
+      <div class="form-group"><label>Bairro</label><input type="text" id="cad-bairro" placeholder="Centro"></div>
+      <div class="form-group"><label>Categorias (separadas por vírgula)</label><input type="text" id="cad-categorias" placeholder="Hidráulica, Elétrica, Acabamento"></div>
+      <div class="form-group"><label>Taxa de entrega por KM (R$)</label><input type="number" id="cad-taxa" value="2" step="0.5"></div>
+      <div class="form-group"><label>Tempo de preparo</label><input type="text" id="cad-tempo" value="30-60 min" placeholder="Ex: 30-60 min"></div>
+      <div class="form-group"><label>Descrição</label><textarea id="cad-descricao" placeholder="Fale sobre sua loja..."></textarea></div>
+      <div class="form-group"><label>Senha</label><input type="password" id="cad-senha" placeholder="Crie uma senha"></div>
+      <button class="btn btn-primary" onclick="cadastroLoja()">Cadastrar Loja</button>
+      <div style="text-align:center;padding:16px;font-size:13px;color:var(--texto-sec)">Já tem conta? <a style="color:var(--laranja);font-weight:600;cursor:pointer" onclick="showLogin()">Fazer login</a></div>
+    </div>
+  </div>
+</div>
+
+<div id="page-dashboard" class="pages" style="display:none">
+  <div class="header"><h1>🏪 <span id="loja-header-name">Painel</span></h1><div class="sub">Gerenciar loja e pedidos</div></div>
+  <div class="tabs" style="margin-top:12px">
+    <button class="tab active" onclick="switchDashboardTab('pedidos',this)">📋 Pedidos</button>
+    <button class="tab" onclick="switchDashboardTab('produtos',this)">📦 Produtos</button>
+    <button class="tab" onclick="switchDashboardTab('perfil',this)">⚙️ Perfil</button>
+  </div>
+  <div id="dash-pedidos"></div>
+  <div id="dash-produtos" style="display:none"></div>
+  <div id="dash-perfil" style="display:none"></div>
+</div>
+
+<script>
+const API = '';
+let token = localStorage.getItem('loja_token');
+let loja = JSON.parse(localStorage.getItem('loja') || 'null');
+
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',3000);}
+async function api(path,opts={}){const h={'Content-Type':'application/json'};if(token)h['Authorization']='Bearer '+token;try{const r=await fetch(API+path,{...opts,headers:h});return await r.json()}catch(e){return{error:e.message}}}
+
+function showCadastro(){document.getElementById('login-form').style.display='none';document.getElementById('cadastro-form').style.display='block'}
+function showLogin(){document.getElementById('login-form').style.display='block';document.getElementById('cadastro-form').style.display='none'}
+
+async function loginLoja(){
+  const email=document.getElementById('login-email').value;
+  const senha=document.getElementById('login-senha').value;
+  if(!email||!senha)return toast('Preencha email e senha');
+  const r=await api('/api/lojas/login',{method:'POST',body:JSON.stringify({email,senha})});
+  if(r.error)return toast(r.error);
+  token=r.token;loja=r.loja;
+  localStorage.setItem('loja_token',token);localStorage.setItem('loja',JSON.stringify(loja));
+  document.getElementById('loja-header-name').textContent=loja.nome;
+  toast('Bem-vindo, '+loja.nome+'!');entrarDashboard();
+}
+
+async function cadastroLoja(){
+  const d={
+    nome:document.getElementById('cad-nome').value,
+    email:document.getElementById('cad-email').value,
+    telefone:document.getElementById('cad-telefone').value,
+    endereco:document.getElementById('cad-endereco').value,
+    bairro:document.getElementById('cad-bairro').value,
+    categorias:document.getElementById('cad-categorias').value,
+    taxa_entrega_km:parseFloat(document.getElementById('cad-taxa').value)||2,
+    tempo_entrega_min:document.getElementById('cad-tempo').value,
+    descricao:document.getElementById('cad-descricao').value,
+    senha:document.getElementById('cad-senha').value
+  };
+  if(!d.nome||!d.email||!d.senha)return toast('Preencha nome, email e senha');
+  const r=await api('/api/lojas/cadastro',{method:'POST',body:JSON.stringify(d)});
+  if(r.error)return toast(r.error);
+  token=r.token;loja=r.loja;
+  localStorage.setItem('loja_token',token);localStorage.setItem('loja',JSON.stringify(loja));
+  document.getElementById('loja-header-name').textContent=loja.nome;
+  toast('Loja cadastrada!');entrarDashboard();
+}
+
+function entrarDashboard(){
+  document.getElementById('page-login').style.display='none';
+  document.getElementById('page-login').classList.remove('active');
+  document.getElementById('page-dashboard').style.display='block';
+  document.getElementById('page-dashboard').classList.add('active');
+  carregarPedidosLoja();
+}
+
+function switchDashboardTab(tab,btn){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  btn.classList.add('active');
+  ['pedidos','produtos','perfil'].forEach(t=>document.getElementById('dash-'+t).style.display=t===tab?'block':'none');
+  if(tab==='pedidos')carregarPedidosLoja();
+  if(tab==='produtos')carregarProdutosLoja();
+  if(tab==='perfil')carregarPerfilLoja();
+}
+
+async function carregarPedidosLoja(){
+  const el=document.getElementById('dash-pedidos');
+  const r=await api('/api/pedidos/loja/'+loja.id);
+  if(!r.pedidos||r.pedidos.length===0){el.innerHTML=`<div class="empty-state"><div class="icon" style="font-size:48px">📋</div><h3>Nenhum pedido ainda</h3></div>`;return}
+  const statusLabel={'aguardando':'⏳ Aguardando','confirmado':'✅ Confirmado','saiu_entrega':'🛵 Saiu','entregue':'📦 Entregue','cancelado':'❌ Cancelado'};
+  const statusColors={'aguardando':'#F57F17','confirmado':'#1565C0','saiu_entrega':'#2E7D32','entregue':'#7B1FA2','cancelado':'#C62828'};
+  el.innerHTML=r.pedidos.map(p=>`
+    <div class="order-item">
+      <span class="status" style="background:${statusColors[p.status]}22;color:${statusColors[p.status]}">${statusLabel[p.status]||p.status}</span>
+      <div style="font-size:14px;font-weight:600;margin:4px 0">👤 ${p.cliente_nome}</div>
+      <div class="meta">📍 ${p.endereco_entrega||'Retirada'} • ${p.tipo_entrega==='entrega'?'🛵 Entrega':'🏪 Retirada'}</div>
+      <div class="meta">💳 ${p.forma_pagamento}</div>
+      <div class="meta">${p.data_pedido}</div>
+      <div class="total">R$ ${p.total_final.toFixed(2)}</div>
+      ${p.status==='aguardando'?`
+        <div class="actions">
+          <button style="background:var(--verde);color:var(--branco)" onclick="confirmarPedido(${p.id})">✅ Confirmar</button>
+          <button style="background:#C62828;color:var(--branco)" onclick="cancelarPedido(${p.id})">❌ Cancelar</button>
+        </div>
+      `:''}
+      ${p.status==='confirmado'?`
+        <div class="actions">
+          <button style="background:var(--laranja);color:var(--branco)" onclick="liberarEntrega(${p.id})">🛵 Liberar para entrega</button>
+        </div>
+      `:''}
+      ${p.codigo_retirada?`<div style="margin-top:6px;font-size:14px;font-weight:700;color:var(--laranja)">🔑 Código retirada: ${p.codigo_retirada}</div>`:''}
+    </div>
+  `).join('');
+}
+
+async function confirmarPedido(id){
+  const r=await api('/api/pedidos/'+id+'/status',{method:'PUT',body:JSON.stringify({status:'confirmado'})});
+  if(r.error)return toast(r.error);toast('Pedido confirmado!');carregarPedidosLoja();
+}
+async function cancelarPedido(id){
+  const r=await api('/api/pedidos/'+id+'/status',{method:'PUT',body:JSON.stringify({status:'cancelado'})});
+  if(r.error)return toast(r.error);toast('Pedido cancelado');carregarPedidosLoja();
+}
+async function liberarEntrega(id){
+  const r=await api('/api/pedidos/'+id+'/liberar',{method:'PUT'});
+  if(r.error)return toast(r.error);toast('Pedido liberado para entregador!');carregarPedidosLoja();
+}
+
+async function carregarProdutosLoja(){
+  const el=document.getElementById('dash-produtos');
+  const r=await api('/api/lojas/'+loja.id);
+  if(!r.produtos||r.produtos.length===0){
+    el.innerHTML=`
+      <div class="empty-state"><div class="icon" style="font-size:48px">📦</div><h3>Nenhum produto cadastrado</h3></div>
+      <div style="padding:0 16px">${adicionarProdutoForm()}</div>
+    `;return;
+  }
+  el.innerHTML=`
+    <div style="padding:0 16px">${adicionarProdutoForm()}</div>
+    ${r.produtos.map(p=>`
+      <div class="card" style="display:flex;justify-content:space-between;align-items:center">
+        <div><h3>${p.nome}</h3><div class="meta">R$ ${p.preco.toFixed(2)} • ${p.marca||''}</div></div>
+        <button style="background:#C62828;color:var(--branco);border:none;padding:6px 12px;border-radius:6px;cursor:pointer" onclick="removerProduto(${p.id})">🗑️</button>
+      </div>
+    `).join('')}
+  `;
+}
+
+function adicionarProdutoForm(){
+  return `
+    <div class="card">
+      <h3 style="margin-bottom:8px">➕ Adicionar Produto</h3>
+      <div class="form-group" style="padding:0;margin-bottom:8px"><label>Nome</label><input type="text" id="novo-produto-nome" placeholder="Conexão 25mm"></div>
+      <div class="form-group" style="padding:0;margin-bottom:8px"><label>Preço (R$)</label><input type="number" id="novo-produto-preco" step="0.01" placeholder="15.90"></div>
+      <div class="form-group" style="padding:0;margin-bottom:8px"><label>Marca (opcional)</label><input type="text" id="novo-produto-marca" placeholder="Tigre/Amanco"></div>
+      <div class="form-group" style="padding:0;margin-bottom:8px"><label>Categoria</label><input type="text" id="novo-produto-categoria" placeholder="Hidráulica"></div>
+      <button class="btn btn-primary btn-sm" style="padding:10px;margin:0" onclick="adicionarProduto()">➕ Adicionar</button>
+    </div>
+  `;
+}
+
+async function adicionarProduto(){
+  const d={
+    nome:document.getElementById('novo-produto-nome').value,
+    preco:parseFloat(document.getElementById('novo-produto-preco').value)||0,
+    marca:document.getElementById('novo-produto-marca').value,
+    categoria:document.getElementById('novo-produto-categoria').value
+  };
+  if(!d.nome||!d.preco)return toast('Nome e preço são obrigatórios');
+  const r=await api('/api/lojas/'+loja.id+'/produtos',{method:'POST',body:JSON.stringify(d)});
+  if(r.error)return toast(r.error);toast('Produto adicionado!');carregarProdutosLoja();
+}
+
+async function removerProduto(id){
+  if(!confirm('Remover este produto?'))return;
+  const r=await api('/api/produtos/'+id,{method:'DELETE'});
+  if(r.error)return toast(r.error);toast('Produto removido');carregarProdutosLoja();
+}
+
+function carregarPerfilLoja(){
+  const el=document.getElementById('dash-perfil');
+  el.innerHTML=`
+    <div class="card">
+      <h3>🏪 ${loja.nome}</h3>
+      <div class="meta">📧 ${loja.email}</div>
+      <div class="meta">📱 ${loja.telefone}</div>
+      <div class="meta">📍 ${loja.endereco}, ${loja.bairro}</div>
+      <div class="meta">🛵 R$ ${loja.taxa_entrega_km}/km • ${loja.tempo_entrega_min}</div>
+      <div class="meta">📦 Categorias: ${loja.categorias}</div>
+    </div>
+    <div class="card">
+      <h3>📊 Estatísticas</h3>
+      <div class="meta" id="stats-loja">Carregando...</div>
+    </div>
+  `;
+  api('/api/pedidos/loja/'+loja.id).then(r=>{
+    if(r.pedidos){
+      const total=r.pedidos.length;
+      const entregues=r.pedidos.filter(p=>p.status==='entregue').length;
+      const totalVendido=r.pedidos.reduce((s,p)=>s+(p.status!=='cancelado'?p.total_final:0),0);
+      document.getElementById('stats-loja').innerHTML=`
+        📋 Total de pedidos: ${total}<br>
+        ✅ Entregues: ${entregues}<br>
+        💰 Total vendido: R$ ${totalVendido.toFixed(2)}
+      `;
+    }
+  });
+}
+
+// Init
+if(loja){
+  document.getElementById('loja-header-name').textContent=loja.nome;
+  entrarDashboard();
+}
+</script>
+<script>
+if('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js');
+}
+</script>
+</body>
+</html>

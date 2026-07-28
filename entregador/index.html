@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>ObraExpress - Entregador</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ObraExpress Entregador">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+:root{--laranja:#E65100;--laranja-escuro:#BF360C;--bg:#F5F5F5;--branco:#fff;--texto:#212121;--texto-sec:#757575;--borda:#E0E0E0;--verde:#2E7D32}
+body{background:var(--bg);color:var(--texto);overflow-x:hidden}
+.pages{display:none;min-height:100vh;padding-bottom:80px}
+.pages.active{display:block}
+.header{background:var(--laranja);color:var(--branco);padding:16px;position:sticky;top:0;z-index:100}
+.header h1{font-size:20px}
+.header .sub{font-size:12px;opacity:.8}
+.header-row{display:flex;align-items:center;gap:12px}
+.header-row .back{font-size:24px;cursor:pointer;background:none;border:none;color:var(--branco)}
+.header-row h1{flex:1;font-size:18px}
+.btn{display:block;width:100%;padding:14px;border:none;border-radius:12px;font-size:16px;font-weight:600;cursor:pointer;text-align:center;margin:8px 0}
+.btn-primary{background:var(--laranja);color:var(--branco)}
+.btn-success{background:var(--verde);color:var(--branco)}
+.form-group{margin-bottom:16px;padding:0 16px}
+.form-group label{display:block;font-size:13px;font-weight:600;color:var(--texto-sec);margin-bottom:4px}
+.form-group input,.form-group select{width:100%;padding:12px;border:2px solid var(--borda);border-radius:10px;font-size:15px;outline:none}
+.form-group input:focus{border-color:var(--laranja)}
+.order-card{background:var(--branco);margin:8px 16px;padding:16px;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.order-card h3{font-size:15px;margin-bottom:4px}
+.order-card .meta{font-size:12px;color:var(--texto-sec);margin-bottom:4px}
+.order-card .valor{font-size:16px;font-weight:700;color:var(--laranja);margin:8px 0}
+.status-badge{display:inline-block;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;margin-bottom:8px;background:#E3F2FD;color:#1565C0}
+.bottom-nav{position:fixed;bottom:0;left:0;right:0;background:var(--branco);display:flex;justify-content:space-around;padding:8px 0;padding-bottom:max(8px,env(safe-area-inset-bottom));box-shadow:0 -2px 8px rgba(0,0,0,.08);z-index:200}
+.nav-item{display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 12px;border:none;background:none;color:var(--texto-sec);font-size:11px;cursor:pointer}
+.nav-item.active{color:var(--laranja)}
+.nav-item .icon{font-size:22px}
+.toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:#37474F;color:var(--branco);padding:12px 24px;border-radius:12px;font-size:14px;z-index:999;display:none}
+.empty-state{text-align:center;padding:60px 20px;color:var(--texto-sec)}
+.empty-state .icon{font-size:64px;margin-bottom:16px}
+</style>
+</head>
+<body>
+<div id="toast" class="toast"></div>
+
+<div id="page-home" class="pages active">
+  <div class="header">
+    <h1>🛵 ObraExpress Entregador</h1>
+    <div class="sub">Pedidos disponíveis perto de você</div>
+  </div>
+  <div id="entregador-status" style="margin:12px 16px;display:flex;gap:8px;align-items:center">
+    <span style="font-size:14px">Status:</span>
+    <button id="btn-status" class="btn btn-success btn-sm" style="width:auto;padding:8px 16px;margin:0" onclick="toggleDisponivel()">🟢 Disponível</button>
+  </div>
+  <div class="section-title" style="font-size:16px;font-weight:700;padding:12px 16px 8px">📦 Pedidos para entregar</div>
+  <div id="pedidos-disponiveis"></div>
+</div>
+
+<div id="page-minhas" class="pages">
+  <div class="header">
+    <div class="header-row">
+      <button class="back" onclick="navigate('home')">‹</button>
+      <h1>✅ Minhas Entregas</h1>
+    </div>
+  </div>
+  <div id="minhas-entregas"></div>
+</div>
+
+<div id="page-login" class="pages">
+  <div class="header">
+    <div class="header-row">
+      <button class="back" onclick="navigate('home')">‹</button>
+      <h1 id="auth-title">Entrar como Entregador</h1>
+    </div>
+  </div>
+  <div style="padding:24px 16px">
+    <div id="login-form">
+      <div class="form-group"><label>Email</label><input type="email" id="login-email" placeholder="entregador@email.com"></div>
+      <div class="form-group"><label>Senha</label><input type="password" id="login-senha" placeholder="Sua senha"></div>
+      <button class="btn btn-primary" onclick="loginEntregador()">Entrar</button>
+      <div style="text-align:center;padding:16px;font-size:13px;color:var(--texto-sec)">Não tem conta? <a style="color:var(--laranja);font-weight:600;cursor:pointer" onclick="showCadastro()">Cadastre-se</a></div>
+    </div>
+    <div id="cadastro-form" style="display:none">
+      <div class="form-group"><label>Nome completo</label><input type="text" id="cad-nome" placeholder="Seu nome"></div>
+      <div class="form-group"><label>Email</label><input type="email" id="cad-email" placeholder="entregador@email.com"></div>
+      <div class="form-group"><label>CPF</label><input type="text" id="cad-cpf" placeholder="000.000.000-00"></div>
+      <div class="form-group"><label>Telefone</label><input type="text" id="cad-telefone" placeholder="(98) 99999-9999"></div>
+      <div class="form-group"><label>Veículo</label><select id="cad-veiculo"><option value="Moto">Moto</option><option value="Bicicleta">Bicicleta</option><option value="Carro">Carro</option><option value="Van">Van</option></select></div>
+      <div class="form-group"><label>Placa</label><input type="text" id="cad-placa" placeholder="ABC-1234"></div>
+      <div class="form-group"><label>Senha</label><input type="password" id="cad-senha" placeholder="Crie uma senha"></div>
+      <button class="btn btn-primary" onclick="cadastroEntregador()">Criar Conta</button>
+      <div style="text-align:center;padding:16px;font-size:13px;color:var(--texto-sec)">Já tem conta? <a style="color:var(--laranja);font-weight:600;cursor:pointer" onclick="showLogin()">Fazer login</a></div>
+    </div>
+  </div>
+</div>
+
+<div class="bottom-nav">
+  <button class="nav-item active" onclick="navigate('home')"><span class="icon">🏠</span> Pedidos</button>
+  <button class="nav-item" onclick="navigate('minhas')"><span class="icon">✅</span> Minhas</button>
+  <button class="nav-item" id="nav-user" onclick="navigate('login')"><span class="icon">👤</span> <span id="nav-user-text">Entrar</span></button>
+</div>
+
+<script>
+const API = '';
+let token = localStorage.getItem('entregador_token');
+let entregador = JSON.parse(localStorage.getItem('entregador') || 'null');
+let disponivel = true;
+
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',2500);}
+function navigate(p){document.querySelectorAll('.pages').forEach(el=>el.classList.remove('active'));document.getElementById('page-'+p).classList.add('active');document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));const m={home:0,minhas:1,login:2};if(m[p]!==undefined)document.querySelectorAll('.nav-item')[m[p]].classList.add('active');if(p==='home')carregarPedidos();if(p==='minhas')carregarMinhasEntregas();window.scrollTo(0,0);}
+async function api(path,opts={}){const h={'Content-Type':'application/json'};if(token)h['Authorization']='Bearer '+token;try{const r=await fetch(API+path,{...opts,headers:h});return await r.json()}catch(e){return{error:e.message}}}
+
+function showCadastro(){document.getElementById('login-form').style.display='none';document.getElementById('cadastro-form').style.display='block';document.getElementById('auth-title').textContent='Cadastro Entregador'}
+function showLogin(){document.getElementById('login-form').style.display='block';document.getElementById('cadastro-form').style.display='none';document.getElementById('auth-title').textContent='Entrar como Entregador'}
+
+async function loginEntregador(){
+  const email=document.getElementById('login-email').value;
+  const senha=document.getElementById('login-senha').value;
+  if(!email||!senha)return toast('Preencha email e senha');
+  const r=await api('/api/entregadores/login',{method:'POST',body:JSON.stringify({email,senha})});
+  if(r.error)return toast(r.error);
+  token=r.token;entregador=r.entregador;
+  localStorage.setItem('entregador_token',token);localStorage.setItem('entregador',JSON.stringify(entregador));
+  document.getElementById('nav-user-text').textContent=entregador.nome.split(' ')[0];
+  toast('Bem-vindo, '+entregador.nome.split(' ')[0]+'!');navigate('home');
+}
+
+async function cadastroEntregador(){
+  const d={nome:document.getElementById('cad-nome').value,email:document.getElementById('cad-email').value,cpf:document.getElementById('cad-cpf').value,telefone:document.getElementById('cad-telefone').value,veiculo:document.getElementById('cad-veiculo').value,placa:document.getElementById('cad-placa').value,senha:document.getElementById('cad-senha').value};
+  if(!d.nome||!d.email||!d.senha)return toast('Preencha os campos obrigatórios');
+  const r=await api('/api/entregadores/cadastro',{method:'POST',body:JSON.stringify(d)});
+  if(r.error)return toast(r.error);
+  token=r.token;entregador=r.entregador;
+  localStorage.setItem('entregador_token',token);localStorage.setItem('entregador',JSON.stringify(entregador));
+  document.getElementById('nav-user-text').textContent=entregador.nome.split(' ')[0];
+  toast('Cadastro realizado!');navigate('home');
+}
+
+function toggleDisponivel(){
+  disponivel=!disponivel;
+  document.getElementById('btn-status').textContent=disponivel?'🟢 Disponível':'🔴 Indisponível';
+  document.getElementById('btn-status').style.background=disponivel?'var(--verde)':'#C62828';
+  if(entregador)api('/api/entregadores/'+entregador.id+'/localizacao',{method:'PUT',body:JSON.stringify({disponivel})});
+}
+
+async function carregarPedidos(){
+  const el=document.getElementById('pedidos-disponiveis');
+  if(!entregador){el.innerHTML=`<div class="empty-state"><div class="icon">🔒</div><h3>Faça login</h3><p>Entre como entregador para ver pedidos</p></div>`;return}
+  const r=await api('/api/pedidos/disponiveis');
+  if(!r.pedidos||r.pedidos.length===0){el.innerHTML=`<div class="empty-state"><div class="icon">📦</div><h3>Nenhum pedido disponível</h3><p>Novos pedidos aparecerão aqui</p></div>`;return}
+  el.innerHTML=r.pedidos.map(p=>`
+    <div class="order-card">
+      <span class="status-badge">📦 Aguardando entregador</span>
+      <h3>🏪 ${p.loja_nome}</h3>
+      <div class="meta">📍 Loja: ${p.loja_endereco||'Endereço da loja'}</div>
+      <div class="meta">📍 Cliente: ${p.cliente_endereco||p.endereco_entrega}</div>
+      <div class="meta">👤 Cliente: ${p.cliente_nome} • ${p.cliente_telefone||''}</div>
+      <div class="valor">💰 R$ ${p.total_final.toFixed(2)}</div>
+      <button class="btn btn-primary" onclick="pegarEntrega(${p.id})">🛵 Pegar Entrega</button>
+    </div>
+  `).join('');
+}
+
+async function pegarEntrega(id){
+  const r=await api('/api/pedidos/'+id+'/status',{method:'PUT',body:JSON.stringify({status:'saiu_entrega',entregador_id:entregador.id})});
+  if(r.error)return toast(r.error);
+  toast('Entrega aceita! Vá até a loja 🛵');
+  carregarPedidos();carregarMinhasEntregas();
+}
+
+async function carregarMinhasEntregas(){
+  const el=document.getElementById('minhas-entregas');
+  if(!entregador){el.innerHTML=`<div class="empty-state"><div class="icon">🔒</div><h3>Faça login</h3></div>`;return}
+  const r=await api('/api/pedidos/entregador/'+entregador.id);
+  if(!r.pedidos||r.pedidos.length===0){el.innerHTML=`<div class="empty-state"><div class="icon">✅</div><h3>Nenhuma entrega ainda</h3></div>`;return}
+  const statusLabel={'aguardando':'⏳ Aguardando','confirmado':'✅ Confirmado','saiu_entrega':'🛵 Em entrega','entregue':'📦 Entregue','cancelado':'❌ Cancelado'};
+  el.innerHTML=r.pedidos.map(p=>`
+    <div class="order-card">
+      <span class="status-badge" style="background:${p.status==='entregue'?'#E8F5E9':'#FFF8E1'};color:${p.status==='entregue'?'#2E7D32':'#F57F17'}">${statusLabel[p.status]||p.status}</span>
+      <h3>🏪 ${p.loja_nome}</h3>
+      <div class="meta">📍 ${p.endereco_entrega||'Retirada na loja'}</div>
+      <div class="meta">${p.data_pedido}</div>
+      <div class="valor">💰 R$ ${p.total_final.toFixed(2)}</div>
+      ${p.status==='saiu_entrega'?`<button class="btn btn-success" onclick="finalizarEntrega(${p.id})">✅ Entregue</button>`:''}
+    </div>
+  `).join('');
+}
+
+async function finalizarEntrega(id){
+  const r=await api('/api/pedidos/'+id+'/status',{method:'PUT',body:JSON.stringify({status:'entregue'})});
+  if(r.error)return toast(r.error);
+  toast('Entrega finalizada! 🎉');
+  carregarMinhasEntregas();carregarPedidos();
+}
+
+// Init
+if(entregador)document.getElementById('nav-user-text').textContent=entregador.nome.split(' ')[0];
+carregarPedidos();
+</script>
+<script>
+if('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js');
+}
+</script>
+</body>
+</html>
