@@ -1,5 +1,5 @@
 const express = require('express');
-const Database = require('better-sqlite3');
+const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -17,141 +17,168 @@ app.use(express.static(path.join(__dirname, 'frontend')));
 app.use('/loja', express.static(path.join(__dirname, 'frontend')));
 app.use('/entregador', express.static(path.join(__dirname, 'entregador')));
 
-// Database setup
-const db = new Database('obraexpress.db');
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+// Database setup (sqlite3)
+const db = new sqlite3.Database('obraexpress.db');
+
+const dbRun = (sql, params = []) => new Promise((resolve, reject) => {
+  db.run(sql, params, function(err) {
+    if (err) reject(err);
+    else resolve(this);
+  });
+});
+
+const dbAll = (sql, params = []) => new Promise((resolve, reject) => {
+  db.all(sql, params, (err, rows) => {
+    if (err) reject(err);
+    else resolve(rows);
+  });
+});
+
+const dbGet = (sql, params = []) => new Promise((resolve, reject) => {
+  db.get(sql, params, (err, row) => {
+    if (err) reject(err);
+    else resolve(row);
+  });
+});
 
 // Create tables
-db.exec(`
-  CREATE TABLE IF NOT EXISTS lojas (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nome TEXT NOT NULL,
-    cnpj TEXT UNIQUE,
-    email TEXT UNIQUE NOT NULL,
-    senha TEXT NOT NULL,
-    telefone TEXT,
-    whatsapp TEXT,
-    logo TEXT,
-    endereco TEXT,
-    bairro TEXT,
-    cidade TEXT DEFAULT 'São Luís',
-    estado TEXT DEFAULT 'MA',
-    latitude REAL,
-    longitude REAL,
-    descricao TEXT,
-    categorias TEXT,
-    taxa_entrega_km REAL DEFAULT 2.00,
-    entrega_gratis_ate REAL DEFAULT 0,
-    tempo_entrega_min TEXT DEFAULT '30-60 min',
-    aberto INTEGER DEFAULT 1,
-    data_cadastro TEXT DEFAULT (datetime('now', '-3 hours'))
-  );
+db.serialize(() => {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS lojas (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nome TEXT NOT NULL,
+      cnpj TEXT UNIQUE,
+      email TEXT UNIQUE NOT NULL,
+      senha TEXT NOT NULL,
+      telefone TEXT,
+      whatsapp TEXT,
+      logo TEXT,
+      endereco TEXT,
+      bairro TEXT,
+      cidade TEXT DEFAULT 'São Luís',
+      estado TEXT DEFAULT 'MA',
+      latitude REAL,
+      longitude REAL,
+      descricao TEXT,
+      categorias TEXT,
+      taxa_entrega_km REAL DEFAULT 2.00,
+      entrega_gratis_ate REAL DEFAULT 0,
+      tempo_entrega_min TEXT DEFAULT '30-60 min',
+      aberto INTEGER DEFAULT 1,
+      data_cadastro TEXT DEFAULT (datetime('now', '-3 hours'))
+    )`);
 
-  CREATE TABLE IF NOT EXISTS produtos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    loja_id INTEGER NOT NULL,
-    nome TEXT NOT NULL,
-    descricao TEXT,
-    preco REAL NOT NULL,
-    foto TEXT,
-    categoria TEXT,
-    marca TEXT,
-    unidade TEXT DEFAULT 'un',
-    estoque INTEGER DEFAULT 999,
-    destaque INTEGER DEFAULT 0,
-    ativo INTEGER DEFAULT 1,
-    data_cadastro TEXT DEFAULT (datetime('now', '-3 hours')),
-    FOREIGN KEY (loja_id) REFERENCES lojas(id) ON DELETE CASCADE
-  );
+  db.run(`
+    CREATE TABLE IF NOT EXISTS produtos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      loja_id INTEGER NOT NULL,
+      nome TEXT NOT NULL,
+      descricao TEXT,
+      preco REAL NOT NULL,
+      foto TEXT,
+      categoria TEXT,
+      marca TEXT,
+      unidade TEXT DEFAULT 'un',
+      estoque INTEGER DEFAULT 999,
+      destaque INTEGER DEFAULT 0,
+      ativo INTEGER DEFAULT 1,
+      data_cadastro TEXT DEFAULT (datetime('now', '-3 hours')),
+      FOREIGN KEY (loja_id) REFERENCES lojas(id) ON DELETE CASCADE
+    )`);
 
-  CREATE TABLE IF NOT EXISTS clientes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nome TEXT NOT NULL,
-    email TEXT UNIQUE NOT NULL,
-    senha TEXT NOT NULL,
-    telefone TEXT,
-    endereco_padrao TEXT,
-    bairro TEXT,
-    cidade TEXT DEFAULT 'São Luís',
-    estado TEXT DEFAULT 'MA',
-    latitude REAL,
-    longitude REAL,
-    data_cadastro TEXT DEFAULT (datetime('now', '-3 hours'))
-  );
+  db.run(`
+    CREATE TABLE IF NOT EXISTS clientes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nome TEXT NOT NULL,
+      email TEXT UNIQUE NOT NULL,
+      senha TEXT NOT NULL,
+      telefone TEXT,
+      endereco_padrao TEXT,
+      bairro TEXT,
+      cidade TEXT DEFAULT 'São Luís',
+      estado TEXT DEFAULT 'MA',
+      latitude REAL,
+      longitude REAL,
+      data_cadastro TEXT DEFAULT (datetime('now', '-3 hours'))
+    )`);
 
-  CREATE TABLE IF NOT EXISTS entregadores (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nome TEXT NOT NULL,
-    cpf TEXT UNIQUE,
-    email TEXT UNIQUE NOT NULL,
-    senha TEXT NOT NULL,
-    telefone TEXT,
-    veiculo TEXT,
-    placa TEXT,
-    foto TEXT,
-    disponivel INTEGER DEFAULT 1,
-    latitude REAL,
-    longitude REAL,
-    avaliacao REAL DEFAULT 5.0,
-    total_entregas INTEGER DEFAULT 0,
-    data_cadastro TEXT DEFAULT (datetime('now', '-3 hours'))
-  );
+  db.run(`
+    CREATE TABLE IF NOT EXISTS entregadores (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nome TEXT NOT NULL,
+      cpf TEXT UNIQUE,
+      email TEXT UNIQUE NOT NULL,
+      senha TEXT NOT NULL,
+      telefone TEXT,
+      veiculo TEXT,
+      placa TEXT,
+      foto TEXT,
+      disponivel INTEGER DEFAULT 1,
+      latitude REAL,
+      longitude REAL,
+      avaliacao REAL DEFAULT 5.0,
+      total_entregas INTEGER DEFAULT 0,
+      data_cadastro TEXT DEFAULT (datetime('now', '-3 hours'))
+    )`);
 
-  CREATE TABLE IF NOT EXISTS pedidos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    cliente_id INTEGER NOT NULL,
-    loja_id INTEGER NOT NULL,
-    entregador_id INTEGER,
-    status TEXT DEFAULT 'aguardando',
-    itens TEXT NOT NULL,
-    total_produtos REAL NOT NULL,
-    taxa_entrega REAL DEFAULT 0,
-    total_final REAL NOT NULL,
-    forma_pagamento TEXT DEFAULT 'entrega',
-    tipo_entrega TEXT DEFAULT 'entrega',
-    endereco_entrega TEXT,
-    bairro_entrega TEXT,
-    latitude_entrega REAL,
-    longitude_entrega REAL,
-    observacao TEXT,
-    distancia_km REAL,
-    codigo_retirada TEXT,
-    data_pedido TEXT DEFAULT (datetime('now', '-3 hours')),
-    data_confirmacao TEXT,
-    data_saida TEXT,
-    data_entrega TEXT,
-    FOREIGN KEY (cliente_id) REFERENCES clientes(id),
-    FOREIGN KEY (loja_id) REFERENCES lojas(id),
-    FOREIGN KEY (entregador_id) REFERENCES entregadores(id)
-  );
+  db.run(`
+    CREATE TABLE IF NOT EXISTS pedidos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cliente_id INTEGER NOT NULL,
+      loja_id INTEGER NOT NULL,
+      entregador_id INTEGER,
+      status TEXT DEFAULT 'aguardando',
+      itens TEXT NOT NULL,
+      total_produtos REAL NOT NULL,
+      taxa_entrega REAL DEFAULT 0,
+      total_final REAL NOT NULL,
+      forma_pagamento TEXT DEFAULT 'entrega',
+      tipo_entrega TEXT DEFAULT 'entrega',
+      endereco_entrega TEXT,
+      bairro_entrega TEXT,
+      latitude_entrega REAL,
+      longitude_entrega REAL,
+      observacao TEXT,
+      distancia_km REAL,
+      codigo_retirada TEXT,
+      data_pedido TEXT DEFAULT (datetime('now', '-3 hours')),
+      data_confirmacao TEXT,
+      data_saida TEXT,
+      data_entrega TEXT,
+      FOREIGN KEY (cliente_id) REFERENCES clientes(id),
+      FOREIGN KEY (loja_id) REFERENCES lojas(id),
+      FOREIGN KEY (entregador_id) REFERENCES entregadores(id)
+    )`);
 
-  CREATE TABLE IF NOT EXISTS categorias (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nome TEXT NOT NULL,
-    icone TEXT,
-    ordem INTEGER DEFAULT 0
-  );
-`);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS categorias (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nome TEXT NOT NULL,
+      icone TEXT,
+      ordem INTEGER DEFAULT 0
+    )`);
 
-// Insert default categories
-const catCount = db.prepare('SELECT COUNT(*) as count FROM categorias').get();
-if (catCount.count === 0) {
-  const insertCat = db.prepare('INSERT INTO categorias (nome, icone, ordem) VALUES (?, ?, ?)');
-  const cats = [
-    ['Hidráulica', '🔧', 1],
-    ['Elétrica', '⚡', 2],
-    ['Conexões', '🔩', 3],
-    ['Ferragens', '🔨', 4],
-    ['Acabamento', '🏠', 5],
-    ['Pisos e Revestimentos', '🧱', 6],
-    ['Tintas', '🎨', 7],
-    ['Ferramentas', '🛠️', 8],
-    ['Segurança', '🪖', 9],
-    ['Hidráulica', '🚿', 10]
-  ];
-  cats.forEach(c => insertCat.run(c[0], c[1], c[2]));
-}
+  // Insert default categories if none exist
+  db.get('SELECT COUNT(*) as count FROM categorias', (err, row) => {
+    if (row && row.count === 0) {
+      const cats = [
+        ['Hidráulica', '🔧', 1],
+        ['Elétrica', '⚡', 2],
+        ['Conexões', '🔩', 3],
+        ['Ferragens', '🔨', 4],
+        ['Acabamento', '🏠', 5],
+        ['Pisos e Revestimentos', '🧱', 6],
+        ['Tintas', '🎨', 7],
+        ['Ferramentas', '🛠️', 8],
+        ['Segurança', '🪖', 9],
+        ['Hidráulica', '🚿', 10]
+      ];
+      const stmt = db.prepare('INSERT INTO categorias (nome, icone, ordem) VALUES (?, ?, ?)');
+      cats.forEach(c => stmt.run(c));
+      stmt.finalize();
+    }
+  });
+});
 
 // ============ MIDDLEWARE ============
 function authLojas(req, res, next) {
@@ -173,47 +200,48 @@ function authCliente(req, res, next) {
 }
 
 // ============ LOJAS API ============
-app.post('/api/lojas/cadastro', (req, res) => {
+app.post('/api/lojas/cadastro', async (req, res) => {
   const { nome, email, senha, telefone, endereco, bairro, latitude, longitude, descricao, categorias, taxa_entrega_km } = req.body;
   try {
     const hash = bcrypt.hashSync(senha, 10);
-    const result = db.prepare('INSERT INTO lojas (nome, email, senha, telefone, endereco, bairro, latitude, longitude, descricao, categorias, taxa_entrega_km) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(nome, email, hash, telefone, endereco, bairro, latitude, longitude, descricao, categorias, taxa_entrega_km || 2.00);
-    const token = jwt.sign({ id: result.lastInsertRowid, tipo: 'loja' }, JWT_SECRET);
-    res.json({ success: true, id: result.lastInsertRowid, token, loja: { id: result.lastInsertRowid, nome, email } });
+    const result = await dbRun('INSERT INTO lojas (nome, email, senha, telefone, endereco, bairro, latitude, longitude, descricao, categorias, taxa_entrega_km) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [nome, email, hash, telefone, endereco, bairro, latitude, longitude, descricao, categorias, taxa_entrega_km || 2.00]);
+    const token = jwt.sign({ id: result.lastID, tipo: 'loja' }, JWT_SECRET);
+    res.json({ success: true, id: result.lastID, token, loja: { id: result.lastID, nome, email } });
   } catch (e) {
     if (e.message.includes('UNIQUE')) return res.status(400).json({ error: 'Email já cadastrado' });
     res.status(500).json({ error: e.message });
   }
 });
 
-app.post('/api/lojas/login', (req, res) => {
+app.post('/api/lojas/login', async (req, res) => {
   const { email, senha } = req.body;
-  const loja = db.prepare('SELECT * FROM lojas WHERE email = ?').get(email);
+  const loja = await dbGet('SELECT * FROM lojas WHERE email = ?', [email]);
   if (!loja) return res.status(401).json({ error: 'Email não encontrado' });
   if (!bcrypt.compareSync(senha, loja.senha)) return res.status(401).json({ error: 'Senha incorreta' });
   const token = jwt.sign({ id: loja.id, tipo: 'loja' }, JWT_SECRET);
   res.json({ success: true, token, loja: { id: loja.id, nome: loja.nome, email: loja.email, logo: loja.logo, aberto: loja.aberto, taxa_entrega_km: loja.taxa_entrega_km } });
 });
 
-app.get('/api/lojas', (req, res) => {
+app.get('/api/lojas', async (req, res) => {
   const { categoria, bairro, busca } = req.query;
-  let sql = 'SELECT id, nome, logo, descricao, categorias, endereco, bairro, taxa_entrega_km, entrega_gratis_ate, tempo_entrega_min, aberto, avaliacao, total_entregas, latitude, longitude FROM lojas WHERE aberto = 1';
+  let sql = 'SELECT id, nome, logo, descricao, categorias, endereco, bairro, taxa_entrega_km, entrega_gratis_ate, tempo_entrega_min, aberto, latitude, longitude FROM lojas WHERE aberto = 1';
   const params = [];
   if (categoria) { sql += ' AND categorias LIKE ?'; params.push(`%${categoria}%`); }
   if (bairro) { sql += ' AND bairro LIKE ?'; params.push(`%${bairro}%`); }
   if (busca) { sql += ' AND (nome LIKE ? OR descricao LIKE ?)'; params.push(`%${busca}%`, `%${busca}%`); }
   sql += ' ORDER BY nome';
-  res.json({ lojas: db.prepare(sql).all(...params) });
+  const lojas = await dbAll(sql, params);
+  res.json({ lojas });
 });
 
-app.get('/api/lojas/:id', (req, res) => {
-  const loja = db.prepare('SELECT id, nome, logo, descricao, categorias, endereco, bairro, cidade, estado, telefone, whatsapp, taxa_entrega_km, entrega_gratis_ate, tempo_entrega_min, aberto, latitude, longitude FROM lojas WHERE id = ?').get(req.params.id);
+app.get('/api/lojas/:id', async (req, res) => {
+  const loja = await dbGet('SELECT id, nome, logo, descricao, categorias, endereco, bairro, cidade, estado, telefone, whatsapp, taxa_entrega_km, entrega_gratis_ate, tempo_entrega_min, aberto, latitude, longitude FROM lojas WHERE id = ?', [req.params.id]);
   if (!loja) return res.status(404).json({ error: 'Loja não encontrada' });
-  const produtos = db.prepare('SELECT * FROM produtos WHERE loja_id = ? AND ativo = 1 ORDER BY destaque DESC, nome').all(req.params.id);
+  const produtos = await dbAll('SELECT * FROM produtos WHERE loja_id = ? AND ativo = 1 ORDER BY destaque DESC, nome', [req.params.id]);
   res.json({ loja, produtos });
 });
 
-app.put('/api/lojas/:id', authLojas, (req, res) => {
+app.put('/api/lojas/:id', authLojas, async (req, res) => {
   if (req.usuario.id != req.params.id) return res.status(403).json({ error: 'Permissão negada' });
   const { nome, telefone, whatsapp, endereco, bairro, latitude, longitude, descricao, categorias, taxa_entrega_km, entrega_gratis_ate, tempo_entrega_min, aberto, logo } = req.body;
   const updates = [];
@@ -234,20 +262,20 @@ app.put('/api/lojas/:id', authLojas, (req, res) => {
   if (logo !== undefined) { updates.push('logo = ?'); params.push(logo); }
   if (updates.length === 0) return res.status(400).json({ error: 'Nada para atualizar' });
   params.push(req.params.id);
-  db.prepare(`UPDATE lojas SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+  await dbRun(`UPDATE lojas SET ${updates.join(', ')} WHERE id = ?`, params);
   res.json({ success: true });
 });
 
 // ============ PRODUTOS API ============
-app.post('/api/produtos', authLojas, (req, res) => {
+app.post('/api/produtos', authLojas, async (req, res) => {
   const { loja_id, nome, descricao, preco, foto, categoria, marca, unidade, estoque } = req.body;
   if (req.usuario.id != loja_id) return res.status(403).json({ error: 'Permissão negada' });
-  const result = db.prepare('INSERT INTO produtos (loja_id, nome, descricao, preco, foto, categoria, marca, unidade, estoque) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(loja_id, nome, descricao, preco, foto, categoria, marca, unidade, estoque || 999);
-  res.json({ success: true, id: result.lastInsertRowid });
+  const result = await dbRun('INSERT INTO produtos (loja_id, nome, descricao, preco, foto, categoria, marca, unidade, estoque) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [loja_id, nome, descricao, preco, foto, categoria, marca, unidade, estoque || 999]);
+  res.json({ success: true, id: result.lastID });
 });
 
-app.put('/api/produtos/:id', authLojas, (req, res) => {
-  const produto = db.prepare('SELECT * FROM produtos WHERE id = ?').get(req.params.id);
+app.put('/api/produtos/:id', authLojas, async (req, res) => {
+  const produto = await dbGet('SELECT * FROM produtos WHERE id = ?', [req.params.id]);
   if (!produto) return res.status(404).json({ error: 'Produto não encontrado' });
   if (req.usuario.id != produto.loja_id) return res.status(403).json({ error: 'Permissão negada' });
   const { nome, descricao, preco, foto, categoria, marca, unidade, estoque, ativo, destaque } = req.body;
@@ -264,19 +292,19 @@ app.put('/api/produtos/:id', authLojas, (req, res) => {
   if (destaque !== undefined) { updates.push('destaque = ?'); params.push(destaque ? 1 : 0); }
   if (updates.length === 0) return res.status(400).json({ error: 'Nada para atualizar' });
   params.push(req.params.id);
-  db.prepare(`UPDATE produtos SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+  await dbRun(`UPDATE produtos SET ${updates.join(', ')} WHERE id = ?`, params);
   res.json({ success: true });
 });
 
-app.delete('/api/produtos/:id', authLojas, (req, res) => {
-  const produto = db.prepare('SELECT * FROM produtos WHERE id = ?').get(req.params.id);
+app.delete('/api/produtos/:id', authLojas, async (req, res) => {
+  const produto = await dbGet('SELECT * FROM produtos WHERE id = ?', [req.params.id]);
   if (!produto) return res.status(404).json({ error: 'Produto não encontrado' });
   if (req.usuario.id != produto.loja_id) return res.status(403).json({ error: 'Permissão negada' });
-  db.prepare('DELETE FROM produtos WHERE id = ?').run(req.params.id);
+  await dbRun('DELETE FROM produtos WHERE id = ?', [req.params.id]);
   res.json({ success: true });
 });
 
-app.get('/api/produtos', (req, res) => {
+app.get('/api/produtos', async (req, res) => {
   const { categoria, loja_id, busca } = req.query;
   let sql = 'SELECT p.*, l.nome as loja_nome, l.logo as loja_logo, l.bairro as loja_bairro FROM produtos p JOIN lojas l ON p.loja_id = l.id WHERE p.ativo = 1 AND l.aberto = 1';
   const params = [];
@@ -284,40 +312,41 @@ app.get('/api/produtos', (req, res) => {
   if (loja_id) { sql += ' AND p.loja_id = ?'; params.push(loja_id); }
   if (busca) { sql += ' AND (p.nome LIKE ? OR p.descricao LIKE ?)'; params.push(`%${busca}%`, `%${busca}%`); }
   sql += ' ORDER BY p.destaque DESC, p.nome';
-  res.json({ produtos: db.prepare(sql).all(...params) });
+  const produtos = await dbAll(sql, params);
+  res.json({ produtos });
 });
 
 // ============ CLIENTES API ============
-app.post('/api/clientes/cadastro', (req, res) => {
+app.post('/api/clientes/cadastro', async (req, res) => {
   const { nome, email, senha, telefone, endereco_padrao, bairro, latitude, longitude } = req.body;
   try {
     const hash = bcrypt.hashSync(senha, 10);
-    const result = db.prepare('INSERT INTO clientes (nome, email, senha, telefone, endereco_padrao, bairro, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(nome, email, hash, telefone, endereco_padrao, bairro, latitude, longitude);
-    const token = jwt.sign({ id: result.lastInsertRowid, tipo: 'cliente' }, JWT_SECRET);
-    res.json({ success: true, token, cliente: { id: result.lastInsertRowid, nome, email } });
+    const result = await dbRun('INSERT INTO clientes (nome, email, senha, telefone, endereco_padrao, bairro, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [nome, email, hash, telefone, endereco_padrao, bairro, latitude, longitude]);
+    const token = jwt.sign({ id: result.lastID, tipo: 'cliente' }, JWT_SECRET);
+    res.json({ success: true, token, cliente: { id: result.lastID, nome, email } });
   } catch (e) {
     if (e.message.includes('UNIQUE')) return res.status(400).json({ error: 'Email já cadastrado' });
     res.status(500).json({ error: e.message });
   }
 });
 
-app.post('/api/clientes/login', (req, res) => {
+app.post('/api/clientes/login', async (req, res) => {
   const { email, senha } = req.body;
-  const cliente = db.prepare('SELECT * FROM clientes WHERE email = ?').get(email);
+  const cliente = await dbGet('SELECT * FROM clientes WHERE email = ?', [email]);
   if (!cliente) return res.status(401).json({ error: 'Email não encontrado' });
   if (!bcrypt.compareSync(senha, cliente.senha)) return res.status(401).json({ error: 'Senha incorreta' });
   const token = jwt.sign({ id: cliente.id, tipo: 'cliente' }, JWT_SECRET);
   res.json({ success: true, token, cliente: { id: cliente.id, nome: cliente.nome, email: cliente.email, telefone: cliente.telefone, endereco_padrao: cliente.endereco_padrao, bairro: cliente.bairro } });
 });
 
-app.get('/api/clientes/:id', authCliente, (req, res) => {
+app.get('/api/clientes/:id', authCliente, async (req, res) => {
   if (req.usuario.id != req.params.id) return res.status(403).json({ error: 'Permissão negada' });
-  const cliente = db.prepare('SELECT id, nome, email, telefone, endereco_padrao, bairro, cidade, estado, latitude, longitude FROM clientes WHERE id = ?').get(req.params.id);
+  const cliente = await dbGet('SELECT id, nome, email, telefone, endereco_padrao, bairro, cidade, estado, latitude, longitude FROM clientes WHERE id = ?', [req.params.id]);
   if (!cliente) return res.status(404).json({ error: 'Cliente não encontrado' });
   res.json({ cliente });
 });
 
-app.put('/api/clientes/:id', authCliente, (req, res) => {
+app.put('/api/clientes/:id', authCliente, async (req, res) => {
   if (req.usuario.id != req.params.id) return res.status(403).json({ error: 'Permissão negada' });
   const { nome, telefone, endereco_padrao, bairro, latitude, longitude } = req.body;
   const updates = []; const params = [];
@@ -329,39 +358,39 @@ app.put('/api/clientes/:id', authCliente, (req, res) => {
   if (longitude !== undefined) { updates.push('longitude = ?'); params.push(longitude); }
   if (updates.length === 0) return res.status(400).json({ error: 'Nada para atualizar' });
   params.push(req.params.id);
-  db.prepare(`UPDATE clientes SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+  await dbRun(`UPDATE clientes SET ${updates.join(', ')} WHERE id = ?`, params);
   res.json({ success: true });
 });
 
 // ============ ENTREGADORES API ============
-app.post('/api/entregadores/cadastro', (req, res) => {
+app.post('/api/entregadores/cadastro', async (req, res) => {
   const { nome, cpf, email, senha, telefone, veiculo, placa } = req.body;
   try {
     const hash = bcrypt.hashSync(senha, 10);
-    const result = db.prepare('INSERT INTO entregadores (nome, cpf, email, senha, telefone, veiculo, placa) VALUES (?, ?, ?, ?, ?, ?, ?)').run(nome, cpf, email, hash, telefone, veiculo, placa);
-    const token = jwt.sign({ id: result.lastInsertRowid, tipo: 'entregador' }, JWT_SECRET);
-    res.json({ success: true, token, entregador: { id: result.lastInsertRowid, nome, email } });
+    const result = await dbRun('INSERT INTO entregadores (nome, cpf, email, senha, telefone, veiculo, placa) VALUES (?, ?, ?, ?, ?, ?, ?)', [nome, cpf, email, hash, telefone, veiculo, placa]);
+    const token = jwt.sign({ id: result.lastID, tipo: 'entregador' }, JWT_SECRET);
+    res.json({ success: true, token, entregador: { id: result.lastID, nome, email } });
   } catch (e) {
     if (e.message.includes('UNIQUE')) return res.status(400).json({ error: 'CPF ou email já cadastrado' });
     res.status(500).json({ error: e.message });
   }
 });
 
-app.post('/api/entregadores/login', (req, res) => {
+app.post('/api/entregadores/login', async (req, res) => {
   const { email, senha } = req.body;
-  const entregador = db.prepare('SELECT * FROM entregadores WHERE email = ?').get(email);
+  const entregador = await dbGet('SELECT * FROM entregadores WHERE email = ?', [email]);
   if (!entregador) return res.status(401).json({ error: 'Email não encontrado' });
   if (!bcrypt.compareSync(senha, entregador.senha)) return res.status(401).json({ error: 'Senha incorreta' });
   const token = jwt.sign({ id: entregador.id, tipo: 'entregador' }, JWT_SECRET);
   res.json({ success: true, token, entregador: { id: entregador.id, nome: entregador.nome, email: entregador.email, veiculo: entregador.veiculo, disponivel: entregador.disponivel } });
 });
 
-app.get('/api/entregadores/disponiveis', (req, res) => {
-  const entregadores = db.prepare('SELECT id, nome, veiculo, avaliacao, total_entregas, latitude, longitude FROM entregadores WHERE disponivel = 1').all();
+app.get('/api/entregadores/disponiveis', async (req, res) => {
+  const entregadores = await dbAll('SELECT id, nome, veiculo, total_entregas, latitude, longitude FROM entregadores WHERE disponivel = 1');
   res.json({ entregadores });
 });
 
-app.put('/api/entregadores/:id/localizacao', (req, res) => {
+app.put('/api/entregadores/:id/localizacao', async (req, res) => {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Token não fornecido' });
   try {
@@ -374,53 +403,54 @@ app.put('/api/entregadores/:id/localizacao', (req, res) => {
     if (disponivel !== undefined) { updates.push('disponivel = ?'); params.push(disponivel ? 1 : 0); }
     if (updates.length === 0) return res.status(400).json({ error: 'Nada para atualizar' });
     params.push(req.params.id);
-    db.prepare(`UPDATE entregadores SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+    await dbRun(`UPDATE entregadores SET ${updates.join(', ')} WHERE id = ?`, params);
     res.json({ success: true });
   } catch { res.status(401).json({ error: 'Token inválido' }); }
 });
 
 // ============ PEDIDOS API ============
-app.post('/api/pedidos', authCliente, (req, res) => {
+app.post('/api/pedidos', authCliente, async (req, res) => {
   const { loja_id, itens, total_produtos, taxa_entrega, tipo_entrega, endereco_entrega, bairro_entrega, latitude_entrega, longitude_entrega, distancia_km, forma_pagamento, observacao } = req.body;
   const total_final = total_produtos + (taxa_entrega || 0);
   const codigo = Math.random().toString(36).substring(2, 8).toUpperCase();
-  const result = db.prepare('INSERT INTO pedidos (cliente_id, loja_id, itens, total_produtos, taxa_entrega, total_final, tipo_entrega, endereco_entrega, bairro_entrega, latitude_entrega, longitude_entrega, distancia_km, forma_pagamento, observacao, codigo_retirada) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(req.usuario.id, loja_id, JSON.stringify(itens), total_produtos, taxa_entrega || 0, total_final, tipo_entrega, endereco_entrega, bairro_entrega, latitude_entrega, longitude_entrega, distancia_km || 0, forma_pagamento || 'entrega', observacao, tipo_entrega === 'retirada' ? codigo : null);
-  res.json({ success: true, pedido_id: result.lastInsertRowid, codigo_retirada: tipo_entrega === 'retirada' ? codigo : null });
+  const result = await dbRun('INSERT INTO pedidos (cliente_id, loja_id, itens, total_produtos, taxa_entrega, total_final, tipo_entrega, endereco_entrega, bairro_entrega, latitude_entrega, longitude_entrega, distancia_km, forma_pagamento, observacao, codigo_retirada) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [req.usuario.id, loja_id, JSON.stringify(itens), total_produtos, taxa_entrega || 0, total_final, tipo_entrega, endereco_entrega, bairro_entrega, latitude_entrega, longitude_entrega, distancia_km || 0, forma_pagamento || 'entrega', observacao, tipo_entrega === 'retirada' ? codigo : null]);
+  res.json({ success: true, pedido_id: result.lastID, codigo_retirada: tipo_entrega === 'retirada' ? codigo : null });
 });
 
-app.get('/api/pedidos/loja/:loja_id', authLojas, (req, res) => {
+app.get('/api/pedidos/loja/:loja_id', authLojas, async (req, res) => {
   if (req.usuario.id != req.params.loja_id) return res.status(403).json({ error: 'Permissão negada' });
   const { status } = req.query;
   let sql = 'SELECT p.*, c.nome as cliente_nome, c.telefone as cliente_telefone, c.endereco_padrao, c.bairro FROM pedidos p JOIN clientes c ON p.cliente_id = c.id WHERE p.loja_id = ?';
   const params = [req.params.loja_id];
   if (status) { sql += ' AND p.status = ?'; params.push(status); }
   sql += ' ORDER BY p.data_pedido DESC';
-  res.json({ pedidos: db.prepare(sql).all(...params) });
+  const pedidos = await dbAll(sql, params);
+  res.json({ pedidos });
 });
 
-app.get('/api/pedidos/cliente/:cliente_id', authCliente, (req, res) => {
+app.get('/api/pedidos/cliente/:cliente_id', authCliente, async (req, res) => {
   if (req.usuario.id != req.params.cliente_id) return res.status(403).json({ error: 'Permissão negada' });
-  const pedidos = db.prepare('SELECT p.*, l.nome as loja_nome, l.logo as loja_logo FROM pedidos p JOIN lojas l ON p.loja_id = l.id WHERE p.cliente_id = ? ORDER BY p.data_pedido DESC').all(req.params.cliente_id);
+  const pedidos = await dbAll('SELECT p.*, l.nome as loja_nome, l.logo as loja_logo FROM pedidos p JOIN lojas l ON p.loja_id = l.id WHERE p.cliente_id = ? ORDER BY p.data_pedido DESC', [req.params.cliente_id]);
   res.json({ pedidos });
 });
 
-app.get('/api/pedidos/entregador/:entregador_id', (req, res) => {
-  const pedidos = db.prepare('SELECT p.*, l.nome as loja_nome, l.endereco as loja_endereco, c.nome as cliente_nome, c.telefone as cliente_telefone FROM pedidos p JOIN lojas l ON p.loja_id = l.id JOIN clientes c ON p.cliente_id = c.id WHERE p.entregador_id = ? ORDER BY p.data_pedido DESC').all(req.params.entregador_id);
+app.get('/api/pedidos/entregador/:entregador_id', async (req, res) => {
+  const pedidos = await dbAll('SELECT p.*, l.nome as loja_nome, l.endereco as loja_endereco, c.nome as cliente_nome, c.telefone as cliente_telefone FROM pedidos p JOIN lojas l ON p.loja_id = l.id JOIN clientes c ON p.cliente_id = c.id WHERE p.entregador_id = ? ORDER BY p.data_pedido DESC', [req.params.entregador_id]);
   res.json({ pedidos });
 });
 
-app.get('/api/pedidos/disponiveis', (req, res) => {
-  const pedidos = db.prepare("SELECT p.*, l.nome as loja_nome, l.endereco as loja_endereco, l.latitude as loja_latitude, l.longitude as loja_longitude, c.nome as cliente_nome, c.telefone as cliente_telefone, c.endereco_padrao as cliente_endereco, c.latitude as cliente_latitude, c.longitude as cliente_longitude FROM pedidos p JOIN lojas l ON p.loja_id = l.id JOIN clientes c ON p.cliente_id = c.id WHERE p.status = 'confirmado' AND p.tipo_entrega = 'entrega' AND p.entregador_id IS NULL ORDER BY p.data_pedido ASC").all();
+app.get('/api/pedidos/disponiveis', async (req, res) => {
+  const pedidos = await dbAll("SELECT p.*, l.nome as loja_nome, l.endereco as loja_endereco, l.latitude as loja_latitude, l.longitude as loja_longitude, c.nome as cliente_nome, c.telefone as cliente_telefone, c.endereco_padrao as cliente_endereco, c.latitude as cliente_latitude, c.longitude as cliente_longitude FROM pedidos p JOIN lojas l ON p.loja_id = l.id JOIN clientes c ON p.cliente_id = c.id WHERE p.status = 'confirmado' AND p.tipo_entrega = 'entrega' AND p.entregador_id IS NULL ORDER BY p.data_pedido ASC");
   res.json({ pedidos });
 });
 
-app.put('/api/pedidos/:id/status', (req, res) => {
+app.put('/api/pedidos/:id/status', async (req, res) => {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Token não fornecido' });
   try {
     const usuario = jwt.verify(token, JWT_SECRET);
     const { status, entregador_id } = req.body;
-    const pedido = db.prepare('SELECT * FROM pedidos WHERE id = ?').get(req.params.id);
+    const pedido = await dbGet('SELECT * FROM pedidos WHERE id = ?', [req.params.id]);
     if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado' });
 
     const updates = []; const params = [];
@@ -431,19 +461,19 @@ app.put('/api/pedidos/:id/status', (req, res) => {
     if (status === 'entregue') updates.push("data_entrega = datetime('now', '-3 hours')");
     if (updates.length === 0) return res.status(400).json({ error: 'Nada para atualizar' });
     params.push(req.params.id);
-    db.prepare(`UPDATE pedidos SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+    await dbRun(`UPDATE pedidos SET ${updates.join(', ')} WHERE id = ?`, params);
 
-    // If assigned to a delivery person, increment their count
     if (entregador_id && status === 'saiu_entrega') {
-      db.prepare('UPDATE entregadores SET total_entregas = total_entregas + 1 WHERE id = ?').run(entregador_id);
+      await dbRun('UPDATE entregadores SET total_entregas = total_entregas + 1 WHERE id = ?', [entregador_id]);
     }
     res.json({ success: true });
   } catch { res.status(401).json({ error: 'Token inválido' }); }
 });
 
 // ============ CATEGORIAS ============
-app.get('/api/categorias', (req, res) => {
-  res.json({ categorias: db.prepare('SELECT * FROM categorias ORDER BY ordem').all() });
+app.get('/api/categorias', async (req, res) => {
+  const categorias = await dbAll('SELECT * FROM categorias ORDER BY ordem');
+  res.json({ categorias });
 });
 
 // ============ DISTÂNCIA SIMULADA ============
