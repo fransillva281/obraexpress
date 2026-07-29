@@ -1,3 +1,4 @@
+
 const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors');
@@ -14,8 +15,16 @@ const JWT_SECRET = 'obraexpress_secret_key_2026';
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'frontend')));
-app.use('/loja', express.static(path.join(__dirname, 'frontend')));
+app.use('/loja', express.static(path.join(__dirname, 'loja')));
 app.use('/entregador', express.static(path.join(__dirname, 'entregador')));
+
+// Fallback para rotas do PWA (para que o refresh nas subpastas funcione)
+app.get('/loja/*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'loja', 'index.html'));
+});
+app.get('/entregador/*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'entregador', 'index.html'));
+});
 
 // Database setup (sqlite3)
 const db = new sqlite3.Database('obraexpress.db');
