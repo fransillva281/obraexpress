@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>ObraExpress - Admin</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+:root{--laranja:#E65100;--laranja-escuro:#BF360C;--bg:#F5F5F5;--branco:#fff;--texto:#212121;--texto-sec:#757575;--verde:#2E7D32;--vermelho:#C62828}
+body{background:var(--bg);color:var(--texto)}
+.header{background:var(--laranja);color:var(--branco);padding:16px;position:sticky;top:0;z-index:100}
+.header h1{font-size:20px;font-weight:700}
+.header .sub{font-size:12px;opacity:.8}
+.container{max-width:900px;margin:0 auto;padding:16px}
+.card{background:var(--branco);border-radius:12px;padding:16px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.card h3{font-size:16px;margin-bottom:8px;color:var(--laranja)}
+.stat-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px}
+.stat-item{background:var(--branco);border-radius:12px;padding:16px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.stat-item .num{font-size:28px;font-weight:700;color:var(--laranja)}
+.stat-item .label{font-size:12px;color:var(--texto-sec);margin-top:4px}
+.btn{display:inline-block;padding:10px 20px;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;margin:4px;text-decoration:none}
+.btn-primary{background:var(--laranja);color:var(--branco)}
+.btn-sm{padding:6px 12px;font-size:12px}
+.tag{display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600}
+.tag-aguardando{background:#FFF3E0;color:#E65100}
+.tag-confirmado{background:#E3F2FD;color:#1565C0}
+.tag-separado{background:#F3E5F5;color:#7B1FA2}
+.tag-saiu_entrega{background:#E8F5E9;color:#2E7D32}
+.tag-entregue{background:#E8F5E9;color:#1B5E20}
+.tag-cancelado{background:#FFEBEE;color:#C62828}
+.form-group{margin-bottom:12px}
+.form-group label{display:block;font-size:13px;font-weight:600;margin-bottom:4px;color:var(--texto-sec)}
+.form-group input,.form-group select{width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:14px}
+.login-box{max-width:360px;margin:100px auto;padding:24px;background:var(--branco);border-radius:16px;box-shadow:0 4px 12px rgba(0,0,0,.1)}
+.login-box h2{text-align:center;margin-bottom:20px;color:var(--laranja)}
+.tab-bar{display:flex;gap:4px;margin-bottom:16px;overflow-x:auto}
+.tab-bar .tab{padding:10px 16px;border-radius:8px;background:var(--branco);cursor:pointer;font-size:13px;font-weight:600;white-space:nowrap;border:1px solid #eee}
+.tab-bar .tab.active{background:var(--laranja);color:var(--branco);border-color:var(--laranja)}
+.pedido-item{padding:12px;border-bottom:1px solid #eee}
+.pedido-item:last-child{border-bottom:none}
+.pedido-item .flex{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.pedido-item .info{font-size:13px;color:var(--texto-sec)}
+@media(max-width:480px){.stat-grid{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>👑 ObraExpress Admin</h1>
+  <div class="sub">Painel de controle da plataforma</div>
+</div>
+
+<div class="container" id="app">
+  <!-- Login -->
+  <div id="page-login" class="login-box">
+    <h2>🔐 Admin</h2>
+    <div class="form-group">
+      <label>Email</label>
+      <input type="email" id="login-email" value="admin@obraexpress.com">
+    </div>
+    <div class="form-group">
+      <label>Senha</label>
+      <input type="password" id="login-senha" placeholder="admin123">
+    </div>
+    <button class="btn btn-primary" onclick="login()" style="width:100%">Entrar</button>
+  </div>
+
+  <!-- Dashboard -->
+  <div id="page-dashboard" style="display:none">
+    <div class="tab-bar">
+      <div class="tab active" onclick="mudarAba('dashboard',this)">📊 Dashboard</div>
+      <div class="tab" onclick="mudarAba('pedidos',this)">📋 Pedidos</div>
+      <div class="tab" onclick="mudarAba('financeiro',this)">💰 Financeiro</div>
+    </div>
+
+    <!-- Aba Dashboard -->
+    <div id="aba-dashboard">
+      <div class="stat-grid" id="stats-grid">
+        <div class="stat-item"><div class="num" id="stat-lojas">0</div><div class="label">🏪 Lojas</div></div>
+        <div class="stat-item"><div class="num" id="stat-entregadores">0</div><div class="label">🛵 Entregadores</div></div>
+        <div class="stat-item"><div class="num" id="stat-clientes">0</div><div class="label">👤 Clientes</div></div>
+        <div class="stat-item"><div class="num" id="stat-pedidos-hoje">0</div><div class="label">📦 Pedidos Hoje</div></div>
+        <div class="stat-item"><div class="num" id="stat-pendentes">0</div><div class="label">⏳ Pendentes</div></div>
+        <div class="stat-item"><div class="num" id="stat-faturamento">R$ 0</div><div class="label">💰 Faturamento</div></div>
+      </div>
+      
+      <div class="card">
+        <h3>📋 Últimos Pedidos</h3>
+        <div id="ultimos-pedidos"></div>
+      </div>
+    </div>
+
+    <!-- Aba Pedidos -->
+    <div id="aba-pedidos" style="display:none">
+      <div class="card">
+        <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+          <button class="btn btn-sm btn-primary" onclick="carregarPedidos('')">Todos</button>
+          <button class="btn btn-sm" onclick="carregarPedidos('aguardando')">⏳ Aguardando</button>
+          <button class="btn btn-sm" onclick="carregarPedidos('confirmado')">✅ Confirmado</button>
+          <button class="btn btn-sm" onclick="carregarPedidos('separado')">🟣 Separado</button>
+          <button class="btn btn-sm" onclick="carregarPedidos('saiu_entrega')">🛵 Em entrega</button>
+          <button class="btn btn-sm" onclick="carregarPedidos('entregue')">📦 Entregue</button>
+          <button class="btn btn-sm" onclick="carregarPedidos('cancelado')">❌ Cancelado</button>
+        </div>
+        <div id="lista-pedidos"></div>
+      </div>
+    </div>
+
+    <!-- Aba Financeiro -->
+    <div id="aba-financeiro" style="display:none">
+      <div class="card">
+        <h3>💰 Saldo da Plataforma</h3>
+        <p style="font-size:24px;font-weight:700;color:var(--laranja)" id="total-plataforma">R$ 0,00</p>
+      </div>
+      <div class="card">
+        <h3>🛵 Saldo dos Entregadores</h3>
+        <div id="saldos-entregadores"></div>
+      </div>
+      <div class="card">
+        <h3>📊 Histórico Plataforma</h3>
+        <div id="historico-plataforma"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '';
+let token = localStorage.getItem('obraexpress_admin_token');
+
+function api(path, opts={}) {
+  opts.headers = opts.headers || {};
+  if (token) opts.headers['Authorization'] = 'Bearer ' + token;
+  opts.headers['Content-Type'] = 'application/json';
+  return fetch(API + path, opts).then(r => r.json());
+}
+
+async function login() {
+  const email = document.getElementById('login-email').value;
+  const senha = document.getElementById('login-senha').value;
+  const r = await api('/api/admin/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, senha })
+  });
+  if (r.success) {
+    token = r.token;
+    localStorage.setItem('obraexpress_admin_token', token);
+    document.getElementById('page-login').style.display = 'none';
+    document.getElementById('page-dashboard').style.display = 'block';
+    carregarDashboard();
+  } else {
+    alert('Credenciais inválidas!');
+  }
+}
+
+async function carregarDashboard() {
+  const r = await api('/api/admin/dashboard');
+  document.getElementById('stat-lojas').textContent = r.lojas;
+  document.getElementById('stat-entregadores').textContent = r.entregadores;
+  document.getElementById('stat-clientes').textContent = r.clientes;
+  document.getElementById('stat-pedidos-hoje').textContent = r.pedidosHoje;
+  document.getElementById('stat-pendentes').textContent = r.pedidosPendentes;
+  document.getElementById('stat-faturamento').textContent = 'R$ ' + (r.faturamento || 0).toFixed(2);
+  
+  if (r.ultimosPedidos) {
+    const statusLabels = {
+      'aguardando': '⏳ Aguardando', 'confirmado': '✅ Confirmado',
+      'separado': '🟣 Separado', 'saiu_entrega': '🛵 Saiu p/ entrega',
+      'entregue': '📦 Entregue', 'cancelado': '❌ Cancelado'
+    };
+    document.getElementById('ultimos-pedidos').innerHTML = r.ultimosPedidos.map(p => `
+      <div class="pedido-item">
+        <div class="flex">
+          <span><strong>#${p.id}</strong> - ${p.loja_nome}</span>
+          <span class="tag tag-${p.status}">${statusLabels[p.status] || p.status}</span>
+        </div>
+        <div class="info">👤 ${p.cliente_nome}${p.entregador_nome ? ' • 🛵 '+p.entregador_nome : ''} • R$ ${p.total_final.toFixed(2)}</div>
+      </div>
+    `).join('');
+  }
+}
+
+async function carregarPedidos(status) {
+  const url = status ? '/api/admin/pedidos?status='+status : '/api/admin/pedidos';
+  const r = await api(url);
+  const statusLabels = {
+    'aguardando': '⏳ Aguardando', 'confirmado': '✅ Confirmado',
+    'separado': '🟣 Separado', 'saiu_entrega': '🛵 Saiu p/ entrega',
+    'entregue': '📦 Entregue', 'cancelado': '❌ Cancelado'
+  };
+  document.getElementById('lista-pedidos').innerHTML = (r.pedidos || []).map(p => `
+    <div class="pedido-item">
+      <div class="flex">
+        <span><strong>#${p.id}</strong> - ${p.loja_nome}</span>
+        <span class="tag tag-${p.status}">${statusLabels[p.status] || p.status}</span>
+      </div>
+      <div class="info">👤 ${p.cliente_nome}${p.entregador_nome ? ' • 🛵 '+p.entregador_nome : ' • ⏳ Sem entregador'} • R$ ${p.total_final.toFixed(2)} • ${p.data_pedido}</div>
+    </div>
+  `).join('');
+}
+
+async function carregarFinanceiro() {
+  const r = await api('/api/admin/financeiro');
+  document.getElementById('total-plataforma').textContent = 'R$ ' + (r.totalPlataforma || 0).toFixed(2);
+  
+  if (r.saldoEntregadores) {
+    document.getElementById('saldos-entregadores').innerHTML = r.saldoEntregadores.map(e => `
+      <div class="pedido-item">
+        <div class="flex">
+          <span><strong>🛵 ${e.entregador_nome}</strong></span>
+          <span style="color:var(--verde);font-weight:700">R$ ${e.saldo.toFixed(2)}</span>
+        </div>
+        <div class="info">💰 Total ganho: R$ ${e.total_ganho.toFixed(2)} • Pix: ${e.chave_pix || 'Não cadastrou'}</div>
+      </div>
+    `).join('');
+  }
+  
+  if (r.saldoPlataforma) {
+    document.getElementById('historico-plataforma').innerHTML = r.saldoPlataforma.map(h => `
+      <div class="pedido-item">
+        <div class="flex">
+          <span>${h.descricao}</span>
+          <span style="color:var(--verde);font-weight:600">+R$ ${h.valor.toFixed(2)}</span>
+        </div>
+        <div class="info">${h.data}</div>
+      </div>
+    `).join('');
+  }
+}
+
+function mudarAba(aba, el) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  document.querySelectorAll('[id^="aba-"]').forEach(a => a.style.display = 'none');
+  document.getElementById('aba-'+aba).style.display = 'block';
+  if (aba === 'pedidos') carregarPedidos('');
+  if (aba === 'financeiro') carregarFinanceiro();
+}
+
+// Auto login
+if (token) {
+  document.getElementById('page-login').style.display = 'none';
+  document.getElementById('page-dashboard').style.display = 'block';
+  carregarDashboard();
+}
+</script>
+</body>
+</html>

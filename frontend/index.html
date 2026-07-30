@@ -15,28 +15,21 @@
 body{background:var(--bg);color:var(--texto);overflow-x:hidden}
 .pages{display:none;min-height:100vh;padding-bottom:80px}
 .pages.active{display:block}
-/* HEADER */
 .header{background:var(--laranja);color:var(--branco);padding:16px;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,.15)}
 .header h1{font-size:20px;font-weight:700}
 .header .sub{font-size:12px;opacity:.8}
 .header-row{display:flex;align-items:center;gap:12px}
 .header-row .back{font-size:24px;cursor:pointer;background:none;border:none;color:var(--branco)}
 .header-row h1{flex:1;font-size:18px}
-
-/* SEARCH */
 .search-box{background:var(--branco);margin:12px 16px;border-radius:12px;padding:10px 16px;display:flex;align-items:center;gap:10px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
 .search-box input{flex:1;border:none;outline:none;font-size:15px;background:transparent}
 .search-box .icon{font-size:20px;color:var(--texto-sec)}
-
-/* CATEGORIES */
 .cat-scroll{overflow-x:auto;padding:0 16px;margin:12px 0;white-space:nowrap;-webkit-overflow-scrolling:touch}
 .cat-scroll::-webkit-scrollbar{display:none}
 .cat-item{display:inline-flex;flex-direction:column;align-items:center;margin-right:12px;padding:12px 16px;background:var(--branco);border-radius:16px;box-shadow:0 1px 3px rgba(0,0,0,.06);cursor:pointer;min-width:80px;transition:.2s}
 .cat-item:active{transform:scale(.95)}
 .cat-item .icon{font-size:28px;margin-bottom:4px}
 .cat-item .name{font-size:12px;font-weight:600;color:var(--texto-sec)}
-
-/* STORE CARD */
 .store-card{background:var(--branco);border-radius:16px;margin:8px 16px;padding:16px;display:flex;gap:12px;box-shadow:0 1px 3px rgba(0,0,0,.06);cursor:pointer;transition:.2s}
 .store-card:active{transform:scale(.98)}
 .store-logo{width:56px;height:56px;border-radius:12px;background:var(--laranja-claro);display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0}
@@ -45,8 +38,6 @@ body{background:var(--bg);color:var(--texto);overflow-x:hidden}
 .store-info .meta{font-size:12px;color:var(--texto-sec);margin-bottom:4px}
 .store-info .tags{display:flex;gap:4px;flex-wrap:wrap}
 .store-info .tag{background:var(--laranja-claro);color:var(--laranja);padding:2px 8px;border-radius:8px;font-size:10px;font-weight:600}
-
-/* PRODUCT */
 .product-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:0 16px 16px}
 .product-card{background:var(--branco);border-radius:16px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.06)}
 .product-img{width:100%;height:140px;background:var(--laranja-claro);display:flex;align-items:center;justify-content:center;font-size:48px}
@@ -56,105 +47,88 @@ body{background:var(--bg);color:var(--texto);overflow-x:hidden}
 .product-info .preco{font-size:16px;font-weight:700;color:var(--laranja);margin-bottom:8px}
 .product-info .btn-add{width:100%;padding:8px;background:var(--laranja);color:var(--branco);border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;transition:.2s}
 .product-info .btn-add:active{transform:scale(.95)}
-
-/* BUTTONS */
 .btn{display:block;width:100%;padding:14px;border:none;border-radius:12px;font-size:16px;font-weight:600;cursor:pointer;transition:.2s;text-align:center;text-decoration:none}
 .btn-primary{background:var(--laranja);color:var(--branco)}
 .btn-primary:active{transform:scale(.98)}
 .btn-secondary{background:var(--branco);color:var(--laranja);border:2px solid var(--laranja)}
 .btn-success{background:var(--verde);color:var(--branco)}
 .btn-danger{background:var(--vermelho);color:var(--branco)}
-.btn-sm{padding:10px;font-size:14px;border-radius:8px}
-
-/* FORM */
-.form-group{margin-bottom:16px;padding:0 16px}
-.form-group label{display:block;font-size:13px;font-weight:600;color:var(--texto-sec);margin-bottom:4px}
-.form-group input,.form-group select,.form-group textarea{width:100%;padding:12px;border:2px solid var(--borda);border-radius:10px;font-size:15px;outline:none;transition:.2s}
-.form-group input:focus,.form-group select:focus,.form-group textarea:focus{border-color:var(--laranja)}
-.form-group textarea{resize:vertical;min-height:80px}
-
-/* CART */
-.cart-item{background:var(--branco);margin:8px 16px;padding:12px 16px;border-radius:12px;display:flex;align-items:center;gap:12px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
-.cart-item .info{flex:1}
-.cart-item .info h4{font-size:14px}
-.cart-item .info .preco{font-size:13px;color:var(--laranja);font-weight:600}
-.cart-item .qty{display:flex;align-items:center;gap:8px}
-.cart-item .qty button{width:28px;height:28px;border-radius:50%;border:1px solid var(--borda);background:var(--branco);font-size:16px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center}
-.cart-item .qty span{font-weight:600;min-width:20px;text-align:center}
-.cart-resumo{background:var(--branco);margin:16px;padding:16px;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
-.cart-resumo .row{display:flex;justify-content:space-between;margin-bottom:8px;font-size:14px}
-.cart-resumo .total{font-size:18px;font-weight:700;color:var(--laranja);border-top:1px solid var(--borda);padding-top:8px}
-
-/* ORDER */
-.order-card{background:var(--branco);margin:8px 16px;padding:16px;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.btn-sm{padding:10px;font-size:14px}
+.btn-group{display:flex;gap:8px;margin:16px 0}
+.btn-group .btn{flex:1}
+.form-group{margin-bottom:12px}
+.form-group label{display:block;font-size:13px;font-weight:600;margin-bottom:4px;color:var(--texto-sec)}
+.form-group input,.form-group textarea,.form-group select{width:100%;padding:12px;border:2px solid var(--borda);border-radius:10px;font-size:15px;outline:none;transition:.2s;background:var(--branco)}
+.form-group input:focus,.form-group textarea:focus,.form-group select:focus{border-color:var(--laranja)}
+.form-group textarea{resize:none;min-height:60px}
+.section-title{font-size:15px;font-weight:700;padding:16px 16px 8px;color:var(--texto-sec)}
+.empty-state{text-align:center;padding:60px 20px}
+.empty-state .icon{font-size:48px;margin-bottom:12px}
+.empty-state h3{font-size:18px;font-weight:600;margin-bottom:4px}
+.empty-state p{color:var(--texto-sec);font-size:14px}
+.cart-item{display:flex;align-items:center;gap:12px;background:var(--branco);margin:0 16px 8px;padding:12px;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.cart-item-info{flex:1}
+.cart-item-info h4{font-size:14px;font-weight:600}
+.cart-item-info .preco{font-size:13px;color:var(--laranja);font-weight:600}
+.cart-item-qty{display:flex;align-items:center;gap:8px}
+.cart-item-qty button{width:32px;height:32px;border-radius:50%;border:1px solid var(--borda);background:var(--branco);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.cart-item-qty span{font-size:16px;font-weight:600;min-width:20px;text-align:center}
+.cart-resumo{background:var(--branco);border-radius:12px;padding:16px;margin:16px 0}
+.cart-resumo .row{display:flex;justify-content:space-between;padding:6px 0;font-size:14px}
+.cart-resumo .row.total{border-top:1px solid var(--borda);margin-top:8px;padding-top:8px;font-size:18px;font-weight:700;color:var(--laranja)}
+.order-card{background:var(--branco);margin:8px 16px;padding:16px;border-radius:16px;box-shadow:0 1px 3px rgba(0,0,0,.06);cursor:pointer;transition:.2s}
+.order-card:active{transform:scale(.98)}
 .order-card .status{display:inline-block;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;margin-bottom:8px}
-.status-aguardando{background:#FFF8E1;color:#F57F17}
-.status-confirmado{background:#E3F2FD;color:#1565C0}
-.status-saiu_entrega{background:#E8F5E9;color:#2E7D32}
-.status-entregue{background:#F3E5F5;color:#7B1FA2}
+.status-aguardando{background:#FFF3E0;color:#E65100}
+.status-confirmado{background:#E8F5E9;color:#2E7D32}
+.status-separado{background:#E3F2FD;color:#1565C0}
+.status-saiu_entrega{background:#F3E5F5;color:#7B1FA2}
+.status-em_coleta{background:#FFF3E0;color:#E65100}
+.status-entregue{background:#E8F5E9;color:#2E7D32}
 .status-cancelado{background:#FFEBEE;color:#C62828}
-
-/* BOTTOM NAV */
-.bottom-nav{position:fixed;bottom:0;left:0;right:0;background:var(--branco);display:flex;justify-content:space-around;padding:8px 0;padding-bottom:max(8px,env(safe-area-inset-bottom));box-shadow:0 -2px 8px rgba(0,0,0,.08);z-index:200}
-.nav-item{display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;padding:4px 12px;border:none;background:none;color:var(--texto-sec);font-size:11px;transition:.2s;position:relative}
-.nav-item.active{color:var(--laranja)}
-.nav-item .icon{font-size:22px}
-.nav-item .badge{position:absolute;top:-2px;right:4px;background:var(--vermelho);color:var(--branco);font-size:10px;min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-weight:700}
-
-/* TABS */
-.tabs{display:flex;background:var(--branco);margin:0 16px;border-radius:12px;overflow:hidden;margin-bottom:12px}
-.tab{flex:1;padding:12px;text-align:center;font-size:13px;font-weight:600;cursor:pointer;border:none;background:transparent;color:var(--texto-sec);transition:.2s}
-.tab.active{background:var(--laranja);color:var(--branco)}
-
-/* MISC */
-.empty-state{text-align:center;padding:60px 20px;color:var(--texto-sec)}
-.empty-state .icon{font-size:64px;margin-bottom:16px}
-.empty-state h3{font-size:18px;margin-bottom:8px}
-.empty-state p{font-size:14px}
-
-.section-title{font-size:16px;font-weight:700;padding:12px 16px 8px}
-.section-title span{color:var(--laranja)}
-
-/* LOGIN/REGISTER TOGGLE */
-.auth-toggle{text-align:center;padding:16px;font-size:13px;color:var(--texto-sec)}
-.auth-toggle a{color:var(--laranja);font-weight:600;cursor:pointer}
-
-/* LOADING */
-.loading{text-align:center;padding:40px;color:var(--texto-sec)}
-.loading .spinner{display:inline-block;width:40px;height:40px;border:3px solid var(--borda);border-top:3px solid var(--laranja);border-radius:50%;animation:spin .8s linear infinite;margin-bottom:12px}
-@keyframes spin{to{transform:rotate(360deg)}}
-
-/* TOAST */
-.toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:var(--cinza);color:var(--branco);padding:12px 24px;border-radius:12px;font-size:14px;z-index:999;display:none;box-shadow:0 4px 12px rgba(0,0,0,.2);animation:fadeIn .3s}
-@keyframes fadeIn{from{opacity:0;transform:translateX(-50%) translateY(20px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
-
-/* AVALIAÇÃO */
-.estrelas{display:flex;gap:4px;font-size:24px;cursor:pointer}
-.estrelas span{color:#FFB300}
-.estrelas span.vazia{color:#E0E0E0}
-
-/* RESPONSIVE */
-@media(max-width:360px){.product-grid{grid-template-columns:1fr}}
+.order-card h3{font-size:15px;font-weight:600;margin-bottom:4px}
+.order-card .meta{font-size:12px;color:var(--texto-sec);margin:2px 0}
+.order-card .total{font-size:16px;font-weight:700;color:var(--laranja);margin:4px 0}
+.order-card .entregador-info{background:var(--bg);border-radius:8px;padding:8px;margin-top:8px;font-size:13px}
+.order-card .avaliar-btn{display:block;width:100%;padding:10px;background:var(--laranja-claro);color:var(--laranja);border:2px solid var(--laranja);border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;margin-top:8px;text-align:center}
+.order-card .avaliar-btn:active{transform:scale(.98)}
+.order-card .pix-info{background:#E8F5E9;border-radius:8px;padding:8px;margin-top:8px;font-size:12px;color:var(--verde)}
+.order-card .pix-info strong{font-size:14px}
+.confirm-box{background:var(--branco);border-radius:16px;padding:24px;margin:16px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.08)}
+.confirm-box .valor-grande{font-size:36px;font-weight:800;color:var(--laranja);margin:12px 0}
+.confirm-box .detalhe{font-size:14px;color:var(--texto-sec);margin:4px 0}
+.confirm-box .detalhe strong{color:var(--texto)}
+.confirm-box .aviso{background:#FFF3E0;border-radius:8px;padding:12px;margin:16px 0;font-size:13px;color:var(--laranja-escuro)}
+.stars{display:flex;gap:8px;justify-content:center;margin:12px 0}
+.stars span{font-size:32px;cursor:pointer;opacity:.3;transition:.2s}
+.stars span.active{opacity:1}
+.stars span:hover{opacity:1}
+.bottom-nav{position:fixed;bottom:0;left:0;right:0;background:var(--branco);display:flex;border-top:1px solid var(--borda);z-index:1000;padding-bottom:env(safe-area-inset-bottom)}
+.bottom-nav a{flex:1;display:flex;flex-direction:column;align-items:center;padding:8px 0;font-size:11px;color:var(--texto-sec);text-decoration:none;cursor:pointer;transition:.2s}
+.bottom-nav a.active{color:var(--laranja)}
+.bottom-nav a .icon{font-size:22px;margin-bottom:2px}
+.bottom-nav .badge{position:relative}
+.bottom-nav .badge-num{position:absolute;top:-6px;right:-10px;background:var(--laranja);color:var(--branco);font-size:10px;font-weight:700;width:18px;height:18px;border-radius:50%;display:none;align-items:center;justify-content:center}
+.toast{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:var(--cinza);color:var(--branco);padding:12px 24px;border-radius:12px;font-size:14px;z-index:9999;opacity:0;transition:.3s;pointer-events:none;white-space:nowrap}
+.toast.show{opacity:1}
 </style>
 </head>
 <body>
 
-<div id="toast" class="toast"></div>
-
 <!-- ============ HOME ============ -->
 <div id="page-home" class="pages active">
   <div class="header">
-    <h1>🏗️ ObraExpress</h1>
+    <h1>🏪 ObraExpress</h1>
     <div class="sub">Materiais de construção na sua obra</div>
   </div>
   <div class="search-box" onclick="navigate('busca')">
     <span class="icon">🔍</span>
-    <input type="text" placeholder="Buscar produtos ou lojas..." readonly>
+    <input type="text" id="search-input" placeholder="Buscar produtos..." readonly>
   </div>
-  <div class="section-title">Categorias</div>
-  <div class="cat-scroll" id="cat-list"></div>
-  <div class="section-title">Lojas <span>próximas</span></div>
-  <div id="store-list"></div>
+  <div class="section-title">📂 Categorias</div>
+  <div class="cat-scroll" id="categorias-list"></div>
+  <div class="section-title">🏪 Lojas próximas</div>
+  <div id="lojas-list"></div>
 </div>
 
 <!-- ============ BUSCA ============ -->
@@ -162,26 +136,26 @@ body{background:var(--bg);color:var(--texto);overflow-x:hidden}
   <div class="header">
     <div class="header-row">
       <button class="back" onclick="navigate('home')">‹</button>
-      <div class="search-box" style="margin:0;flex:1;box-shadow:none">
-        <span class="icon">🔍</span>
-        <input type="text" id="search-input" placeholder="Buscar produtos..." oninput="searchProducts()">
-      </div>
+      <h1>🔍 Buscar</h1>
     </div>
+  </div>
+  <div class="search-box" style="margin:12px 16px;box-shadow:0 1px 3px rgba(0,0,0,.08)">
+    <span class="icon">🔍</span>
+    <input type="text" id="search-input-page" placeholder="Cimento, tijolo, areia..." oninput="searchProducts()" autofocus>
   </div>
   <div id="search-results"></div>
 </div>
 
-<!-- ============ LOJA DETALHE ============ -->
+<!-- ============ LOJA (produtos) ============ -->
 <div id="page-loja" class="pages">
   <div class="header">
     <div class="header-row">
       <button class="back" onclick="navigate('home')">‹</button>
-      <h1 id="loja-nome-header">Loja</h1>
+      <h1 id="loja-title">Loja</h1>
     </div>
   </div>
-  <div id="loja-info"></div>
-  <div class="section-title">Produtos</div>
-  <div id="produtos-list" class="product-grid"></div>
+  <div id="loja-info" style="padding:12px 16px"></div>
+  <div id="loja-produtos" class="product-grid"></div>
 </div>
 
 <!-- ============ CARRINHO ============ -->
@@ -222,14 +196,25 @@ body{background:var(--bg);color:var(--texto);overflow-x:hidden}
     <div class="form-group">
       <label>Forma de pagamento</label>
       <select id="forma-pagamento">
-        <option value="dinheiro">💵 Dinheiro</option>
         <option value="pix">📱 Pix</option>
+        <option value="dinheiro">💵 Dinheiro</option>
         <option value="cartao">💳 Cartão (na entrega)</option>
       </select>
     </div>
     <div id="checkout-resumo" class="cart-resumo"></div>
-    <button class="btn btn-primary" onclick="finalizarPedido()" style="margin:16px 0">✅ Confirmar Pedido</button>
+    <button class="btn btn-primary" onclick="finalizarPedido()" style="margin:16px 0">✅ Fazer Pedido</button>
   </div>
+</div>
+
+<!-- ============ CONFIRMAR PEDIDO (NOVA) ============ -->
+<div id="page-confirmar" class="pages">
+  <div class="header">
+    <div class="header-row">
+      <button class="back" onclick="navigate('home')">‹</button>
+      <h1>📋 Confirmar Pedido</h1>
+    </div>
+  </div>
+  <div id="confirmar-content" style="padding:16px"></div>
 </div>
 
 <!-- ============ PEDIDOS ============ -->
@@ -241,6 +226,28 @@ body{background:var(--bg);color:var(--texto);overflow-x:hidden}
     </div>
   </div>
   <div id="pedidos-list"></div>
+</div>
+
+<!-- ============ DETALHE DO PEDIDO ============ -->
+<div id="page-detalhe-pedido" class="pages">
+  <div class="header">
+    <div class="header-row">
+      <button class="back" onclick="navigate('pedidos')">‹</button>
+      <h1>📄 Detalhe do Pedido</h1>
+    </div>
+  </div>
+  <div id="detalhe-content" style="padding:16px"></div>
+</div>
+
+<!-- ============ AVALIAR ============ -->
+<div id="page-avaliar" class="pages">
+  <div class="header">
+    <div class="header-row">
+      <button class="back" onclick="navigate('pedidos')">‹</button>
+      <h1>⭐ Avaliar</h1>
+    </div>
+  </div>
+  <div id="avaliar-content" style="padding:16px"></div>
 </div>
 
 <!-- ============ LOGIN / CADASTRO ============ -->
@@ -262,7 +269,7 @@ body{background:var(--bg);color:var(--texto);overflow-x:hidden}
         <input type="password" id="login-senha" placeholder="Sua senha">
       </div>
       <button class="btn btn-primary" onclick="loginCliente()">Entrar</button>
-      <div class="auth-toggle">Não tem conta? <a onclick="showCadastro()">Cadastre-se</a></div>
+      <div class="auth-toggle" style="text-align:center;margin-top:12px;font-size:14px;color:var(--texto-sec)">Não tem conta? <a onclick="showCadastro()" style="color:var(--laranja);font-weight:600;cursor:pointer">Cadastre-se</a></div>
     </div>
     <div id="cadastro-form" style="display:none">
       <div class="form-group">
@@ -275,7 +282,7 @@ body{background:var(--bg);color:var(--texto);overflow-x:hidden}
       </div>
       <div class="form-group">
         <label>Telefone</label>
-        <input type="text" id="cad-telefone" placeholder="(98) 99999-9999">
+        <input type="text" id="cad-telefone" placeholder="(99) 99999-9999">
       </div>
       <div class="form-group">
         <label>Endereço</label>
@@ -283,207 +290,146 @@ body{background:var(--bg);color:var(--texto);overflow-x:hidden}
       </div>
       <div class="form-group">
         <label>Senha</label>
-        <input type="password" id="cad-senha" placeholder="Crie uma senha">
+        <input type="password" id="cad-senha" placeholder="Mínimo 6 caracteres">
       </div>
-      <button class="btn btn-primary" onclick="cadastroCliente()">Criar Conta</button>
-      <div class="auth-toggle">Já tem conta? <a onclick="showLogin()">Fazer login</a></div>
+      <button class="btn btn-primary" onclick="cadastroCliente()">Criar conta</button>
+      <div class="auth-toggle" style="text-align:center;margin-top:12px;font-size:14px;color:var(--texto-sec)">Já tem conta? <a onclick="showLogin()" style="color:var(--laranja);font-weight:600;cursor:pointer">Entrar</a></div>
     </div>
   </div>
 </div>
 
 <!-- ============ BOTTOM NAV ============ -->
 <div class="bottom-nav">
-  <button class="nav-item active" onclick="navigate('home')">
-    <span class="icon">🏠</span> Início
-  </button>
-  <button class="nav-item" onclick="navigate('busca')">
-    <span class="icon">🔍</span> Buscar
-  </button>
-  <button class="nav-item" id="nav-cart" onclick="navigate('cart')">
-    <span class="icon">🛒</span> Carrinho
-    <span class="badge" id="cart-badge" style="display:none">0</span>
-  </button>
-  <button class="nav-item" onclick="navigate('pedidos')">
-    <span class="icon">📋</span> Pedidos
-  </button>
-  <button class="nav-item" id="nav-user" onclick="navigate('login')">
-    <span class="icon">👤</span> <span id="nav-user-text">Entrar</span>
-  </button>
+  <a class="active" onclick="navigate('home')"><span class="icon">🏪</span>Início</a>
+  <a onclick="navigate('busca')"><span class="icon">🔍</span>Buscar</a>
+  <a onclick="navigate('cart')" class="badge"><span class="icon">🛒</span>Carrinho <span class="badge-num" id="cart-badge">0</span></a>
+  <a onclick="navigate('pedidos')"><span class="icon">📋</span>Pedidos</a>
+  <a id="nav-auth" onclick="navigate('login')"><span class="icon">👤</span>Entrar</a>
 </div>
 
-<script>
-// ============ STATE ============
-const API = '';
-let token = localStorage.getItem('token');
-let usuario = JSON.parse(localStorage.getItem('usuario') || 'null');
-let cart = JSON.parse(localStorage.getItem('cart') || '[]');
-let currentLoja = null;
-let categorias = [];
+<div class="toast" id="toast"></div>
 
-// ============ NAVIGATION ============
-function navigate(page) {
-  document.querySelectorAll('.pages').forEach(p => p.classList.remove('active'));
-  document.getElementById('page-' + page).classList.add('active');
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  const navMap = {home:0, busca:1, cart:2, pedidos:3, login:4};
-  if (navMap[page] !== undefined) document.querySelectorAll('.nav-item')[navMap[page]].classList.add('active');
-  if (page === 'home') renderHome();
-  if (page === 'cart') renderCart();
-  if (page === 'pedidos') renderPedidos();
-  if (page === 'login') updateAuthUI();
-  window.scrollTo(0,0);
+<script>
+// ============ CONFIG ============
+const API = '';
+let usuario = JSON.parse(localStorage.getItem('obraexpress_cliente'));
+let cart = JSON.parse(localStorage.getItem('cart') || '[]');
+let lojaAtual = null;
+
+// ============ API ============
+async function api(path, opts = {}) {
+  const headers = {'Content-Type':'application/json'};
+  if (usuario) headers['Authorization'] = 'Bearer ' + usuario.token;
+  try {
+    const r = await fetch(API + path, {...opts, headers});
+    const data = await r.json();
+    if (data.error) return {error: data.error};
+    return data;
+  } catch(e) { return {error: 'Erro de conexão'}; }
 }
 
 // ============ TOAST ============
 function toast(msg) {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.style.display = 'block';
-  setTimeout(() => t.style.display = 'none', 2500);
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2500);
 }
 
-// ============ API ============
-async function api(path, opts={}) {
-  const headers = {'Content-Type':'application/json'};
-  if (token) headers['Authorization'] = 'Bearer ' + token;
-  try {
-    const r = await fetch(API + path, {...opts, headers});
-    return await r.json();
-  } catch(e) { return {error: e.message}; }
-}
-
-// ============ AUTH ============
-function updateAuthUI() {
-  const text = document.getElementById('nav-user-text');
-  text.textContent = usuario ? usuario.nome.split(' ')[0] : 'Entrar';
-}
-
-function showCadastro() {
-  document.getElementById('login-form').style.display = 'none';
-  document.getElementById('cadastro-form').style.display = 'block';
-  document.getElementById('auth-title').textContent = 'Cadastro';
-}
-function showLogin() {
-  document.getElementById('login-form').style.display = 'block';
-  document.getElementById('cadastro-form').style.display = 'none';
-  document.getElementById('auth-title').textContent = 'Entrar';
-}
-
-async function loginCliente() {
-  const email = document.getElementById('login-email').value;
-  const senha = document.getElementById('login-senha').value;
-  if (!email || !senha) return toast('Preencha email e senha');
-  const r = await api('/api/clientes/login', {method:'POST', body:JSON.stringify({email,senha})});
-  if (r.error) return toast(r.error);
-  token = r.token;
-  usuario = r.cliente;
-  localStorage.setItem('token', token);
-  localStorage.setItem('usuario', JSON.stringify(usuario));
-  updateAuthUI();
-  toast('Bem-vindo, ' + usuario.nome.split(' ')[0] + '! 🎉');
-  navigate('home');
-}
-
-async function cadastroCliente() {
-  const d = {
-    nome: document.getElementById('cad-nome').value,
-    email: document.getElementById('cad-email').value,
-    telefone: document.getElementById('cad-telefone').value,
-    endereco_padrao: document.getElementById('cad-endereco').value,
-    senha: document.getElementById('cad-senha').value
-  };
-  if (!d.nome || !d.email || !d.senha) return toast('Preencha nome, email e senha');
-  const r = await api('/api/clientes/cadastro', {method:'POST', body:JSON.stringify(d)});
-  if (r.error) return toast(r.error);
-  token = r.token;
-  usuario = r.cliente;
-  localStorage.setItem('token', token);
-  localStorage.setItem('usuario', JSON.stringify(usuario));
-  updateAuthUI();
-  toast('Conta criada com sucesso! 🎉');
-  navigate('home');
+// ============ NAVIGATION ============
+function navigate(page) {
+  document.querySelectorAll('.pages').forEach(p => p.classList.remove('active'));
+  const el = document.getElementById('page-' + page);
+  if (el) el.classList.add('active');
+  document.querySelectorAll('.bottom-nav a').forEach(a => a.classList.remove('active'));
+  const navMap = {home:'🏪', busca:'🔍', cart:'🛒', pedidos:'📋', login:'👤'};
+  document.querySelectorAll('.bottom-nav a').forEach(a => {
+    if (a.textContent.includes(navMap[page])) a.classList.add('active');
+  });
+  if (page === 'cart') renderCart();
+  if (page === 'pedidos') renderPedidos();
+  if (page === 'home') renderHome();
+  window.scrollTo(0,0);
 }
 
 // ============ HOME ============
 async function renderHome() {
-  // Categorias
-  const catList = document.getElementById('cat-list');
-  if (categorias.length === 0) {
-    const r = await api('/api/categorias');
-    if (r.categorias) categorias = r.categorias;
-  }
-  catList.innerHTML = categorias.map(c => 
-    `<div class="cat-item" onclick="buscarCategoria('${c.nome}')">
-      <div class="icon">${c.icone || '🏪'}</div>
-      <div class="name">${c.nome}</div>
-    </div>`
-  ).join('') + 
-  `<div class="cat-item" onclick="navigate('busca')">
-    <div class="icon">📦</div>
-    <div class="name">Ver Todos</div>
-  </div>`;
+  await renderCategorias();
+  await renderLojas();
+}
 
-  // Lojas
+async function renderCategorias() {
+  const r = await api('/api/categorias');
+  if (!r.categorias) return;
+  document.getElementById('categorias-list').innerHTML = r.categorias.map(c => `
+    <div class="cat-item" onclick="buscarCategoria('${c.nome}')">
+      <span class="icon">${c.icone || '📦'}</span>
+      <span class="name">${c.nome}</span>
+    </div>
+  `).join('');
+}
+
+async function renderLojas() {
   const r = await api('/api/lojas');
-  const list = document.getElementById('store-list');
   if (!r.lojas || r.lojas.length === 0) {
-    list.innerHTML = `<div class="empty-state"><div class="icon">🏪</div><h3>Nenhuma loja ainda</h3><p>Em breve lojas cadastradas aparecerão aqui</p></div>`;
+    document.getElementById('lojas-list').innerHTML = `<div class="empty-state"><div class="icon">🏪</div><h3>Nenhuma loja disponível</h3></div>`;
     return;
   }
-  list.innerHTML = r.lojas.map(l => {
-    const cats = l.categorias ? l.categorias.split(',').slice(0,3) : [];
-    return `<div class="store-card" onclick="abrirLoja(${l.id})">
+  document.getElementById('lojas-list').innerHTML = r.lojas.map(l => `
+    <div class="store-card" onclick="abrirLoja(${l.id})">
       <div class="store-logo">${l.logo || '🏪'}</div>
       <div class="store-info">
         <h3>${l.nome}</h3>
-        <div class="meta">📍 ${l.bairro || 'São Luís'} • 🛵 R$ ${l.taxa_entrega_km || 2}/km</div>
-        <div class="tags">${cats.map(c => `<span class="tag">${c.trim()}</span>`).join('')}</div>
+        <div class="meta">${l.bairro || ''} • 🛵 a partir de R$ ${(l.taxa_entrega_km || 2).toFixed(2)}/km</div>
+        <div class="tags">${(l.categorias || '').split(',').slice(0,3).map(c => `<span class="tag">${c.trim()}</span>`).join('')}</div>
       </div>
-    </div>`;
-  }).join('');
+    </div>
+  `).join('');
 }
 
 function buscarCategoria(cat) {
-  document.getElementById('search-input').value = cat;
+  document.getElementById('search-input-page').value = cat;
   navigate('busca');
   searchProducts();
 }
 
-// ============ LOJA ============
 async function abrirLoja(id) {
-  currentLoja = id;
   const r = await api('/api/lojas/' + id);
   if (r.error) return toast(r.error);
-  document.getElementById('loja-nome-header').textContent = r.loja.nome;
+  const l = r.loja;
+  lojaAtual = l;
+  document.getElementById('loja-title').textContent = l.nome;
   document.getElementById('loja-info').innerHTML = `
-    <div style="padding:16px;display:flex;gap:12px;background:var(--branco);margin:0 16px 8px;border-radius:16px">
-      <div style="font-size:48px">${r.loja.logo || '🏪'}</div>
+    <div style="display:flex;gap:12px;align-items:start">
+      <div style="font-size:48px">${l.logo || '🏪'}</div>
       <div>
-        <h2 style="font-size:18px">${r.loja.nome}</h2>
-        <p style="color:var(--texto-sec);font-size:13px">${r.loja.descricao || ''}</p>
-        <p style="font-size:12px;color:var(--texto-sec);margin-top:4px">📍 ${r.loja.endereco || ''} ${r.loja.bairro || ''}</p>
-        <p style="font-size:12px;color:var(--texto-sec)">🛵 Frete: R$ ${r.loja.taxa_entrega_km || 2}/km • ${r.loja.tempo_entrega_min || '30-60 min'}</p>
-        ${r.loja.whatsapp ? `<p style="font-size:12px;color:var(--verde)">📱 WhatsApp: ${r.loja.whatsapp}</p>` : ''}
+        <h3 style="font-size:18px;font-weight:700">${l.nome}</h3>
+        <p style="font-size:13px;color:var(--texto-sec);margin:4px 0">${l.endereco || ''} • ${l.bairro || ''}</p>
+        <p style="font-size:13px;color:var(--texto-sec)">🛵 R$ ${(l.taxa_entrega_km || 2).toFixed(2)}/km • ${l.tempo_entrega_min || '30-60 min'}</p>
       </div>
     </div>
   `;
-  document.getElementById('produtos-list').innerHTML = r.produtos.map(p => `
-    <div class="product-card">
-      <div class="product-img">${p.foto || '📦'}</div>
-      <div class="product-info">
-        <h4>${p.nome}</h4>
-        <div class="loja-nome">${p.marca || ''}</div>
-        <div class="preco">R$ ${p.preco.toFixed(2)}</div>
-        <button class="btn-add" onclick="addToCart(${p.id},'${p.nome}',${p.preco},${r.loja.id},'${r.loja.nome}')">+ Adicionar</button>
+  if (r.produtos && r.produtos.length > 0) {
+    document.getElementById('loja-produtos').innerHTML = r.produtos.map(p => `
+      <div class="product-card">
+        <div class="product-img">${p.foto || '📦'}</div>
+        <div class="product-info">
+          <h4>${p.nome}</h4>
+          <div class="loja-nome">${p.marca || ''}</div>
+          <div class="preco">R$ ${p.preco.toFixed(2)}</div>
+          <button class="btn-add" onclick="addToCart(${p.id},'${p.nome.replace(/'/g,"\\'")}',${p.preco},${l.id},'${l.nome.replace(/'/g,"\\'")}')">+ Adicionar</button>
+        </div>
       </div>
-    </div>
-  `).join('');
+    `).join('');
+  } else {
+    document.getElementById('loja-produtos').innerHTML = `<div class="empty-state"><div class="icon">📦</div><h3>Nenhum produto</h3></div>`;
+  }
   navigate('loja');
 }
 
 // ============ BUSCA ============
 async function searchProducts() {
-  const q = document.getElementById('search-input').value;
+  const q = document.getElementById('search-input-page').value;
   if (!q) { document.getElementById('search-results').innerHTML = ''; return; }
   const r = await api('/api/produtos?busca=' + encodeURIComponent(q));
   if (!r.produtos || r.produtos.length === 0) {
@@ -533,34 +479,29 @@ function renderCart() {
   }
   const subtotal = cart.reduce((s,i) => s + i.preco * i.qty, 0);
   el.innerHTML = `
-    <div style="padding:12px 16px;font-size:13px;color:var(--texto-sec)">
-      🏪 Pedido de: <strong>${cart[0].loja_nome}</strong>
-    </div>
-    ${cart.map((i,idx) => `
+    <div style="padding:12px 16px;font-size:13px;color:var(--texto-sec)">🛒 ${cart[0].loja_nome}</div>
+    ${cart.map((i, idx) => `
       <div class="cart-item">
-        <div class="info">
+        <div class="cart-item-info">
           <h4>${i.nome}</h4>
           <div class="preco">R$ ${(i.preco * i.qty).toFixed(2)}</div>
         </div>
-        <div class="qty">
-          <button onclick="cartQty(${idx},-1)">−</button>
+        <div class="cart-item-qty">
+          <button onclick="mudarQty(${idx}, -1)">−</button>
           <span>${i.qty}</span>
-          <button onclick="cartQty(${idx},1)">+</button>
+          <button onclick="mudarQty(${idx}, 1)">+</button>
         </div>
       </div>
     `).join('')}
-    <div class="cart-resumo">
+    <div class="cart-resumo" style="margin:16px">
       <div class="row"><span>Subtotal</span><span>R$ ${subtotal.toFixed(2)}</span></div>
       <div class="row total"><span>Total</span><span>R$ ${subtotal.toFixed(2)}</span></div>
     </div>
-    <div style="padding:0 16px;display:flex;gap:8px">
-      <button class="btn btn-danger btn-sm" onclick="limparCart()" style="flex:1">🔄 Limpar</button>
-      <button class="btn btn-primary btn-sm" onclick="irCheckout()" style="flex:2">Continuar ➡️</button>
-    </div>
+    <button class="btn btn-primary" onclick="irCheckout()" style="margin:0 16px">➡️ Continuar</button>
   `;
 }
 
-function cartQty(idx, delta) {
+function mudarQty(idx, delta) {
   cart[idx].qty += delta;
   if (cart[idx].qty <= 0) cart.splice(idx, 1);
   localStorage.setItem('cart', JSON.stringify(cart));
@@ -568,20 +509,12 @@ function cartQty(idx, delta) {
   renderCart();
 }
 
-function limparCart() {
-  cart = [];
-  localStorage.setItem('cart', JSON.stringify(cart));
-  updateCartBadge();
-  renderCart();
-  toast('Carrinho limpo');
-}
-
 // ============ CHECKOUT ============
 function irCheckout() {
   if (!usuario) return toast('Faça login primeiro');
   if (cart.length === 0) return toast('Carrinho vazio');
   const subtotal = cart.reduce((s,i) => s + i.preco * i.qty, 0);
-  const frete = 5; // placeholder
+  const frete = 5;
   document.getElementById('checkout-resumo').innerHTML = `
     <div class="row"><span>Subtotal</span><span>R$ ${subtotal.toFixed(2)}</span></div>
     <div class="row" id="frete-row"><span>🛵 Frete (estimado)</span><span>R$ ${frete.toFixed(2)}</span></div>
@@ -625,10 +558,66 @@ async function finalizarPedido() {
     })
   });
   if (r.error) return toast(r.error);
+
+  // Salvar pedido_id pra confirmar depois
+  window.pedidoConfirmarId = r.pedido_id;
+  window.pedidoConfirmarData = {
+    subtotal, frete, total: subtotal + frete,
+    tipo, pagamento, loja: cart[0].loja_nome
+  };
+
+  // Limpar carrinho
   cart = [];
   localStorage.setItem('cart', JSON.stringify(cart));
   updateCartBadge();
-  toast('Pedido realizado com sucesso! 🎉');
+
+  // Mostrar tela de confirmação
+  mostrarConfirmacao();
+}
+
+function mostrarConfirmacao() {
+  const d = window.pedidoConfirmarData;
+  document.getElementById('confirmar-content').innerHTML = `
+    <div class="confirm-box">
+      <div style="font-size:48px;margin-bottom:8px">🧾</div>
+      <h2 style="font-size:20px;font-weight:700">Resumo do Pedido</h2>
+      <p style="font-size:13px;color:var(--texto-sec);margin:8px 0">${d.loja}</p>
+      
+      <div class="detalhe"><strong>Subtotal:</strong> R$ ${d.subtotal.toFixed(2)}</div>
+      <div class="detalhe"><strong>Frete:</strong> R$ ${d.frete.toFixed(2)}</div>
+      <div class="valor-grande">R$ ${d.total.toFixed(2)}</div>
+      <div class="detalhe"><strong>Pagamento:</strong> ${d.pagamento === 'pix' ? '📱 Pix' : d.pagamento === 'dinheiro' ? '💵 Dinheiro' : '💳 Cartão'}</div>
+      <div class="detalhe"><strong>Entrega:</strong> ${d.tipo === 'entrega' ? '🛵 Entrega' : '🏪 Retirada'}</div>
+      
+      <div class="aviso">
+        ⚠️ <strong>Você está vendo o valor total do seu pedido.</strong><br>
+        Ao confirmar, o pedido será enviado para a loja. Se cancelar, o pedido será descartado.
+      </div>
+
+      <div class="btn-group">
+        <button class="btn btn-success" onclick="confirmarPedido(true)">✅ Confirmar Pedido</button>
+        <button class="btn btn-danger" onclick="confirmarPedido(false)">❌ Cancelar</button>
+      </div>
+    </div>
+  `;
+  navigate('confirmar');
+}
+
+async function confirmarPedido(confirmou) {
+  const id = window.pedidoConfirmarId;
+  if (!id) return toast('Erro: pedido não encontrado');
+  
+  const r = await api('/api/pedidos/' + id + '/confirmar', {
+    method:'PUT',
+    body:JSON.stringify({ confirmou })
+  });
+  if (r.error) return toast(r.error);
+  
+  if (confirmou) {
+    toast('✅ Pedido confirmado! A loja vai preparar.');
+  } else {
+    toast('❌ Pedido cancelado');
+  }
   navigate('pedidos');
 }
 
@@ -643,17 +632,227 @@ async function renderPedidos() {
     document.getElementById('pedidos-list').innerHTML = `<div class="empty-state"><div class="icon">📋</div><h3>Nenhum pedido</h3><p>Seus pedidos aparecerão aqui</p></div>`;
     return;
   }
-  const statusLabel = {'aguardando':'⏳ Aguardando','confirmado':'✅ Confirmado','saiu_entrega':'🛵 Saiu para entrega','entregue':'📦 Entregue','cancelado':'❌ Cancelado'};
+  const statusLabel = {
+    'aguardando':'⏳ Aguardando confirmação',
+    'confirmado':'✅ Confirmado',
+    'separado':'📦 Sendo separado',
+    'em_coleta':'📍 Indo buscar na loja',
+    'saiu_entrega':'🛵 Saiu para entrega',
+    'entregue':'📦 Entregue',
+    'cancelado':'❌ Cancelado'
+  };
   document.getElementById('pedidos-list').innerHTML = r.pedidos.map(p => `
-    <div class="order-card">
+    <div class="order-card" onclick="verDetalhePedido(${p.id})">
       <span class="status status-${p.status}">${statusLabel[p.status] || p.status}</span>
       <h3>🏪 ${p.loja_nome}</h3>
-      <p style="font-size:13px;color:var(--texto-sec);margin:4px 0">${p.data_pedido}</p>
-      <p style="font-size:14px;font-weight:600">Total: R$ ${p.total_final.toFixed(2)}</p>
-      <p style="font-size:12px;color:var(--texto-sec)">${p.tipo_entrega === 'entrega' ? '🛵 Entrega' : '🏪 Retirada'} • ${p.forma_pagamento}</p>
-      ${p.codigo_retirada ? `<p style="font-size:14px;font-weight:700;color:var(--laranja);margin-top:4px">Código: ${p.codigo_retirada}</p>` : ''}
+      <div class="meta">${p.data_pedido}</div>
+      <div class="total">R$ ${p.total_final.toFixed(2)}</div>
+      <div class="meta">${p.tipo_entrega === 'entrega' ? '🛵 Entrega' : '🏪 Retirada'} • ${p.forma_pagamento === 'pix' ? '📱 Pix' : p.forma_pagamento === 'dinheiro' ? '💵 Dinheiro' : '💳 Cartão'}</div>
+      ${p.entregador_nome ? `<div class="entregador-info">🛵 Entregador: ${p.entregador_nome}</div>` : ''}
+      ${p.chave_pix ? `<div class="pix-info">💳 <strong>Pix da loja:</strong> ${p.chave_pix}<br><small>Pague o valor e envie o comprovante</small></div>` : ''}
+      ${p.codigo_retirada ? `<div style="font-size:14px;font-weight:700;color:var(--laranja);margin-top:4px">Código retirada: ${p.codigo_retirada}</div>` : ''}
     </div>
   `).join('');
+}
+
+async function verDetalhePedido(id) {
+  const r = await api('/api/pedidos/cliente/' + usuario.id);
+  if (!r.pedidos) return toast('Erro ao carregar');
+  const p = r.pedidos.find(p => p.id === id);
+  if (!p) return toast('Pedido não encontrado');
+  
+  const statusLabel = {
+    'aguardando':'⏳ Aguardando confirmação',
+    'confirmado':'✅ Pedido confirmado pela loja',
+    'separado':'📦 Loja separou o pedido',
+    'saiu_entrega':'🛵 Motoboy a caminho','em_coleta':'📍 Indo buscar na loja',
+    'entregue':'📦 Entregue',
+    'cancelado':'❌ Cancelado'
+  };
+  const statusDesc = {
+    'aguardando':'Aguardando você confirmar o valor total.',
+    'confirmado':'A loja recebeu seu pedido e está preparando.',
+    'separado':'O pedido foi separado e está aguardando um motoboy.',
+    'saiu_entrega':'O motoboy já pegou o pedido e está a caminho!',
+    'entregue':'Pedido entregue com sucesso! 🎉',
+    'cancelado':'Este pedido foi cancelado.'
+  };
+  
+  let html = `
+    <div class="confirm-box" style="text-align:left">
+      <div style="text-align:center">
+        <span class="status status-${p.status}" style="font-size:14px;padding:6px 16px">${statusLabel[p.status]}</span>
+        <p style="margin:12px 0;font-size:14px;color:var(--texto-sec)">${statusDesc[p.status]}</p>
+      </div>
+      <hr style="margin:16px 0;border:none;border-top:1px solid var(--borda)">
+      <h3 style="font-size:16px;font-weight:700">🏪 ${p.loja_nome}</h3>
+      <div class="detalhe" style="margin:8px 0;font-size:14px;color:var(--texto-sec)">${p.data_pedido}</div>
+      
+      <div style="margin:12px 0">
+        <strong>Itens do pedido:</strong><br>
+        ${(() => {
+          try {
+            const itens = JSON.parse(p.itens);
+            return itens.map(i => `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:14px"><span>${i.qty}x ${i.nome}</span><span>R$ ${(i.preco * i.qty).toFixed(2)}</span></div>`).join('');
+          } catch(e) { return 'Itens não disponíveis'; }
+        })()}
+      </div>
+      
+      <hr style="margin:12px 0;border:none;border-top:1px solid var(--borda)">
+      <div class="detalhe" style="font-size:14px"><strong>Subtotal:</strong> R$ ${p.total_produtos.toFixed(2)}</div>
+      <div class="detalhe" style="font-size:14px"><strong>Frete:</strong> R$ ${(p.taxa_entrega || 0).toFixed(2)}</div>
+      <div class="detalhe" style="font-size:18px;font-weight:700;color:var(--laranja);margin-top:8px"><strong>Total:</strong> R$ ${p.total_final.toFixed(2)}</div>
+      
+      <div style="margin:12px 0;font-size:14px">
+        <strong>Pagamento:</strong> ${p.forma_pagamento === 'pix' ? '📱 Pix' : p.forma_pagamento === 'dinheiro' ? '💵 Dinheiro' : '💳 Cartão na entrega'}<br>
+        <strong>Entrega:</strong> ${p.tipo_entrega === 'entrega' ? '🛵 ' + (p.endereco_entrega || '') : '🏪 Retirada na loja'}
+      </div>
+      
+      ${p.chave_pix ? `<div class="pix-info">💳 <strong>Pix da loja:</strong> ${p.chave_pix}<br><small>Pague direto pra loja e combine a entrega</small></div>` : ''}
+      
+      ${p.entregador_nome ? `
+        <hr style="margin:12px 0;border:none;border-top:1px solid var(--borda)">
+        <div style="font-size:14px">
+          <strong>🛵 Entregador:</strong> ${p.entregador_nome}<br>
+          <strong>Veículo:</strong> ${p.entregador_veiculo || 'Não informado'}
+        </div>
+      ` : ''}
+      
+      ${p.foto_coleta ? `<div style="margin:12px 0"><strong>📸 Foto da coleta:</strong><br><img src="${p.foto_coleta}" style="width:100%;max-width:300px;border-radius:8px;margin-top:4px"></div>` : ''}
+      ${p.foto_entrega ? `<div style="margin:12px 0"><strong>📸 Foto da entrega:</strong><br><img src="${p.foto_entrega}" style="width:100%;max-width:300px;border-radius:8px;margin-top:4px"></div>` : ''}
+      
+      ${p.status === 'entregue' ? `
+        <hr style="margin:12px 0;border:none;border-top:1px solid var(--borda)">
+        <button class="avaliar-btn" onclick="abrirAvaliacao(${p.id}, ${p.loja_id}, ${p.entregador_id || 0})">⭐ Avaliar este pedido</button>
+      ` : ''}
+      
+      ${p.codigo_retirada ? `<div style="margin-top:12px;font-size:16px;font-weight:700;color:var(--laranja);text-align:center;padding:8px;background:var(--laranja-claro);border-radius:8px">Código de retirada: ${p.codigo_retirada}</div>` : ''}
+    </div>
+  `;
+  
+  document.getElementById('detalhe-content').innerHTML = html;
+  navigate('detalhe-pedido');
+}
+
+// ============ AVALIAÇÃO ============
+let avaliandoPedido = null;
+let avaliandoLoja = null;
+let avaliandoEntregador = null;
+let notaSelecionada = 0;
+
+function abrirAvaliacao(pedidoId, lojaId, entregadorId) {
+  avaliandoPedido = pedidoId;
+  avaliandoLoja = lojaId;
+  avaliandoEntregador = entregadorId;
+  notaSelecionada = 0;
+  
+  document.getElementById('avaliar-content').innerHTML = `
+    <div class="confirm-box">
+      <div style="font-size:48px;margin-bottom:8px">⭐</div>
+      <h2 style="font-size:20px;font-weight:700">Avalie seu pedido</h2>
+      <p style="font-size:14px;color:var(--texto-sec);margin:8px 0">De 1 a 5 estrelas</p>
+      
+      <div class="stars" id="stars-container">
+        ${[1,2,3,4,5].map(n => `<span onclick="selecionarNota(${n})" id="star-${n}">⭐</span>`).join('')}
+      </div>
+      <p style="font-size:13px;color:var(--texto-sec);margin-bottom:16px" id="nota-texto">Toque nas estrelas</p>
+      
+      <div class="form-group">
+        <label>Comentário (opcional)</label>
+        <textarea id="avaliacao-comentario" placeholder="Conte como foi sua experiência..."></textarea>
+      </div>
+      
+      <button class="btn btn-primary" onclick="enviarAvaliacao()">⭐ Enviar Avaliação</button>
+    </div>
+  `;
+  navigate('avaliar');
+}
+
+function selecionarNota(n) {
+  notaSelecionada = n;
+  for (let i = 1; i <= 5; i++) {
+    document.getElementById('star-' + i).style.opacity = i <= n ? '1' : '.3';
+  }
+  const textos = ['', 'Péssimo', 'Ruim', 'Regular', 'Bom', 'Excelente!'];
+  document.getElementById('nota-texto').textContent = textos[n];
+}
+
+async function enviarAvaliacao() {
+  if (notaSelecionada === 0) return toast('Selecione uma nota');
+  const comentario = document.getElementById('avaliacao-comentario').value;
+  
+  const r = await api('/api/avaliacoes', {
+    method:'POST',
+    body:JSON.stringify({
+      pedido_id: avaliandoPedido,
+      loja_id: avaliandoLoja,
+      entregador_id: avaliandoEntregador || null,
+      nota: notaSelecionada,
+      comentario: comentario
+    })
+  });
+  if (r.error) return toast(r.error);
+  toast('⭐ Avaliação enviada! Obrigado!');
+  navigate('pedidos');
+}
+
+// ============ AUTH ============
+function updateAuthUI() {
+  const nav = document.getElementById('nav-auth');
+  if (usuario) {
+    nav.innerHTML = `<span class="icon">👤</span>${usuario.nome.split(' ')[0]}`;
+  } else {
+    nav.innerHTML = `<span class="icon">👤</span>Entrar`;
+  }
+}
+
+function showCadastro() {
+  document.getElementById('login-form').style.display = 'none';
+  document.getElementById('cadastro-form').style.display = 'block';
+  document.getElementById('auth-title').textContent = 'Cadastro';
+}
+
+function showLogin() {
+  document.getElementById('login-form').style.display = 'block';
+  document.getElementById('cadastro-form').style.display = 'none';
+  document.getElementById('auth-title').textContent = 'Entrar';
+}
+
+async function loginCliente() {
+  const email = document.getElementById('login-email').value;
+  const senha = document.getElementById('login-senha').value;
+  if (!email || !senha) return toast('Preencha todos os campos');
+  const r = await api('/api/clientes/login', {
+    method:'POST',
+    body:JSON.stringify({email, senha})
+  });
+  if (r.error) return toast(r.error);
+  usuario = r.cliente;
+  usuario.token = r.token;
+  localStorage.setItem('obraexpress_cliente', JSON.stringify(usuario));
+  updateAuthUI();
+  toast('Bem-vindo, ' + usuario.nome + '! 🎉');
+  navigate('home');
+}
+
+async function cadastroCliente() {
+  const nome = document.getElementById('cad-nome').value;
+  const email = document.getElementById('cad-email').value;
+  const telefone = document.getElementById('cad-telefone').value;
+  const endereco = document.getElementById('cad-endereco').value;
+  const senha = document.getElementById('cad-senha').value;
+  if (!nome || !email || !senha) return toast('Preencha nome, email e senha');
+  const r = await api('/api/clientes/cadastro', {
+    method:'POST',
+    body:JSON.stringify({nome, email, senha, telefone, endereco_padrao: endereco})
+  });
+  if (r.error) return toast(r.error);
+  usuario = r.cliente;
+  usuario.token = r.token;
+  localStorage.setItem('obraexpress_cliente', JSON.stringify(usuario));
+  updateAuthUI();
+  toast('Conta criada com sucesso! 🎉');
+  navigate('home');
 }
 
 // ============ INIT ============

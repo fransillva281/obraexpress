@@ -11,7 +11,7 @@
 <link rel="apple-touch-icon" href="/icon-192.png">
 <style>
 *{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
-:root{--laranja:#E65100;--laranja-escuro:#BF360C;--bg:#F5F5F5;--branco:#fff;--texto:#212121;--texto-sec:#757575;--borda:#E0E0E0;--verde:#2E7D32}
+:root{--laranja:#E65100;--laranja-escuro:#BF360C;--bg:#F5F5F5;--branco:#fff;--texto:#212121;--texto-sec:#757575;--borda:#E0E0E0;--verde:#2E7D32;--azul:#1565C0}
 body{background:var(--bg);color:var(--texto)}
 .header{background:var(--laranja);color:var(--branco);padding:16px;position:sticky;top:0;z-index:100}
 .header h1{font-size:20px;font-weight:700}
@@ -19,6 +19,7 @@ body{background:var(--bg);color:var(--texto)}
 .btn{display:block;width:100%;padding:14px;border:none;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer;text-align:center;margin:8px 0}
 .btn-primary{background:var(--laranja);color:var(--branco)}
 .btn-success{background:var(--verde);color:var(--branco)}
+.btn-sm{padding:10px;font-size:13px;margin:4px 0}
 .form-group{margin-bottom:16px;padding:0 16px}
 .form-group label{display:block;font-size:13px;font-weight:600;color:var(--texto-sec);margin-bottom:4px}
 .form-group input,.form-group select,.form-group textarea{width:100%;padding:12px;border:2px solid var(--borda);border-radius:10px;font-size:15px;outline:none}
@@ -58,6 +59,7 @@ body{background:var(--bg);color:var(--texto)}
       <div class="form-group"><label>Telefone / WhatsApp</label><input type="text" id="cad-telefone" placeholder="(98) 99999-9999"></div>
       <div class="form-group"><label>Endereço</label><input type="text" id="cad-endereco" placeholder="Rua, número"></div>
       <div class="form-group"><label>Bairro</label><input type="text" id="cad-bairro" placeholder="Centro"></div>
+      <div class="form-group"><label>Chave Pix (para receber)</label><input type="text" id="cad-pix" placeholder="CPF, email, telefone ou chave aleatória"></div>
       <div class="form-group"><label>Categorias (separadas por vírgula)</label><input type="text" id="cad-categorias" placeholder="Hidráulica, Elétrica, Acabamento"></div>
       <div class="form-group"><label>Taxa de entrega por KM (R$)</label><input type="number" id="cad-taxa" value="2" step="0.5"></div>
       <div class="form-group"><label>Tempo de preparo</label><input type="text" id="cad-tempo" value="30-60 min" placeholder="Ex: 30-60 min"></div>
@@ -111,6 +113,7 @@ async function cadastroLoja(){
     telefone:document.getElementById('cad-telefone').value,
     endereco:document.getElementById('cad-endereco').value,
     bairro:document.getElementById('cad-bairro').value,
+    chave_pix:document.getElementById('cad-pix').value,
     categorias:document.getElementById('cad-categorias').value,
     taxa_entrega_km:parseFloat(document.getElementById('cad-taxa').value)||2,
     tempo_entrega_min:document.getElementById('cad-tempo').value,
@@ -147,27 +150,42 @@ async function carregarPedidosLoja(){
   const el=document.getElementById('dash-pedidos');
   const r=await api('/api/pedidos/loja/'+loja.id);
   if(!r.pedidos||r.pedidos.length===0){el.innerHTML=`<div class="empty-state"><div class="icon" style="font-size:48px">📋</div><h3>Nenhum pedido ainda</h3></div>`;return}
-  const statusLabel={'aguardando':'⏳ Aguardando','confirmado':'✅ Confirmado','saiu_entrega':'🛵 Saiu','entregue':'📦 Entregue','cancelado':'❌ Cancelado'};
-  const statusColors={'aguardando':'#F57F17','confirmado':'#1565C0','saiu_entrega':'#2E7D32','entregue':'#7B1FA2','cancelado':'#C62828'};
+  const statusLabel={'aguardando':'⏳ Aguardando','confirmado':'✅ Confirmado','separado':'📦 Separado','saiu_entrega':'🛵 Saiu','entregue':'📦 Entregue','cancelado':'❌ Cancelado'};
+  const statusColors={'aguardando':'#F57F17','confirmado':'#1565C0','separado':'#2E7D32','saiu_entrega':'#7B1FA2','entregue':'#2E7D32','cancelado':'#C62828'};
   el.innerHTML=r.pedidos.map(p=>`
     <div class="order-item">
       <span class="status" style="background:${statusColors[p.status]}22;color:${statusColors[p.status]}">${statusLabel[p.status]||p.status}</span>
       <div style="font-size:14px;font-weight:600;margin:4px 0">👤 ${p.cliente_nome}</div>
+      <div class="meta">${p.cliente_telefone ? '📞 '+p.cliente_telefone : ''}</div>
       <div class="meta">📍 ${p.endereco_entrega||'Retirada'} • ${p.tipo_entrega==='entrega'?'🛵 Entrega':'🏪 Retirada'}</div>
-      <div class="meta">💳 ${p.forma_pagamento}</div>
+      <div class="meta">💳 ${p.forma_pagamento==='pix'?'📱 Pix':p.forma_pagamento==='dinheiro'?'💵 Dinheiro':'💳 Cartão'}</div>
       <div class="meta">${p.data_pedido}</div>
       <div class="total">R$ ${p.total_final.toFixed(2)}</div>
+      
+      ${p.separado_por ? `<div class="meta" style="color:var(--azul);font-weight:600">👤 Separado por: ${p.separado_por}</div>` : ''}
+      ${p.entregador_nome ? `<div class="meta" style="color:#7B1FA2">🛵 Entregador: ${p.entregador_nome}</div>` : ''}
+      
       ${p.status==='aguardando'?`
         <div class="actions">
           <button style="background:var(--verde);color:var(--branco)" onclick="confirmarPedido(${p.id})">✅ Confirmar</button>
           <button style="background:#C62828;color:var(--branco)" onclick="cancelarPedido(${p.id})">❌ Cancelar</button>
         </div>
       `:''}
+      
       ${p.status==='confirmado'?`
-        <div class="actions">
-          <button style="background:var(--laranja);color:var(--branco)" onclick="liberarEntrega(${p.id})">🛵 Liberar para entrega</button>
+        <div style="margin-top:8px">
+          <div class="form-group" style="padding:0;margin-bottom:4px">
+            <label style="font-size:12px">👤 Quem separou o pedido?</label>
+            <input type="text" id="separador-${p.id}" placeholder="Nome do funcionário" style="padding:8px;font-size:13px">
+          </div>
+          <button class="btn btn-sm btn-success" style="margin:0" onclick="separarPedido(${p.id})">📦 Finalizar Separação</button>
         </div>
       `:''}
+      
+      ${p.status==='separado'?`
+        <div class="meta" style="color:var(--azul)">🕐 Aguardando motoboy aceitar...</div>
+      `:''}
+      
       ${p.codigo_retirada?`<div style="margin-top:6px;font-size:14px;font-weight:700;color:var(--laranja)">🔑 Código retirada: ${p.codigo_retirada}</div>`:''}
     </div>
   `).join('');
@@ -175,15 +193,21 @@ async function carregarPedidosLoja(){
 
 async function confirmarPedido(id){
   const r=await api('/api/pedidos/'+id+'/status',{method:'PUT',body:JSON.stringify({status:'confirmado'})});
-  if(r.error)return toast(r.error);toast('Pedido confirmado!');carregarPedidosLoja();
+  if(r.error)return toast(r.error);toast('✅ Pedido confirmado!');carregarPedidosLoja();
 }
+
 async function cancelarPedido(id){
   const r=await api('/api/pedidos/'+id+'/status',{method:'PUT',body:JSON.stringify({status:'cancelado'})});
-  if(r.error)return toast(r.error);toast('Pedido cancelado');carregarPedidosLoja();
+  if(r.error)return toast(r.error);toast('❌ Pedido cancelado');carregarPedidosLoja();
 }
-async function liberarEntrega(id){
-  const r=await api('/api/pedidos/'+id+'/liberar',{method:'PUT'});
-  if(r.error)return toast(r.error);toast('Pedido liberado para entregador!');carregarPedidosLoja();
+
+async function separarPedido(id){
+  const separadoPor=document.getElementById('separador-'+id).value;
+  if(!separadoPor)return toast('Informe quem separou o pedido');
+  const r=await api('/api/pedidos/'+id+'/separar',{method:'PUT',body:JSON.stringify({separado_por:separadoPor})});
+  if(r.error)return toast(r.error);
+  toast('📦 Pedido separado! Já está disponível para os motoboys.');
+  carregarPedidosLoja();
 }
 
 async function carregarProdutosLoja(){
@@ -199,7 +223,7 @@ async function carregarProdutosLoja(){
     <div style="padding:0 16px">${adicionarProdutoForm()}</div>
     ${r.produtos.map(p=>`
       <div class="card" style="display:flex;justify-content:space-between;align-items:center">
-        <div><h3>${p.nome}</h3><div class="meta">R$ ${p.preco.toFixed(2)} • ${p.marca||''}</div></div>
+        <div><h3>${p.nome}</h3><div class="meta">R$ ${p.preco.toFixed(2)} • ${p.marca||''} • ${p.categoria||''}</div></div>
         <button style="background:#C62828;color:var(--branco);border:none;padding:6px 12px;border-radius:6px;cursor:pointer" onclick="removerProduto(${p.id})">🗑️</button>
       </div>
     `).join('')}
@@ -227,7 +251,7 @@ async function adicionarProduto(){
     categoria:document.getElementById('novo-produto-categoria').value
   };
   if(!d.nome||!d.preco)return toast('Nome e preço são obrigatórios');
-  const r=await api('/api/lojas/'+loja.id+'/produtos',{method:'POST',body:JSON.stringify(d)});
+  const r=await api('/api/produtos',{method:'POST',body:JSON.stringify({...d,loja_id:loja.id})});
   if(r.error)return toast(r.error);toast('Produto adicionado!');carregarProdutosLoja();
 }
 
@@ -243,10 +267,7 @@ function carregarPerfilLoja(){
     <div class="card">
       <h3>🏪 ${loja.nome}</h3>
       <div class="meta">📧 ${loja.email}</div>
-      <div class="meta">📱 ${loja.telefone}</div>
-      <div class="meta">📍 ${loja.endereco}, ${loja.bairro}</div>
-      <div class="meta">🛵 R$ ${loja.taxa_entrega_km}/km • ${loja.tempo_entrega_min}</div>
-      <div class="meta">📦 Categorias: ${loja.categorias}</div>
+      <div class="meta">🛵 R$ ${loja.taxa_entrega_km}/km</div>
     </div>
     <div class="card">
       <h3>📊 Estatísticas</h3>
