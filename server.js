@@ -126,6 +126,34 @@ db.serialize(() => {
     )`);
 
   db.run(`
+    CREATE TABLE IF NOT EXISTS pedidos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cliente_id INTEGER NOT NULL,
+      loja_id INTEGER NOT NULL,
+      entregador_id INTEGER,
+      itens TEXT NOT NULL,
+      total_produtos REAL NOT NULL DEFAULT 0,
+      taxa_entrega REAL DEFAULT 0,
+      total_final REAL NOT NULL DEFAULT 0,
+      tipo_entrega TEXT DEFAULT 'entrega',
+      endereco_entrega TEXT,
+      bairro_entrega TEXT,
+      latitude_entrega REAL,
+      longitude_entrega REAL,
+      distancia_km REAL DEFAULT 0,
+      forma_pagamento TEXT DEFAULT 'pix',
+      observacao TEXT,
+      status TEXT DEFAULT 'aguardando',
+      codigo_retirada TEXT,
+      data_pedido TEXT DEFAULT (datetime('now', '-3 hours')),
+      data_confirmacao TEXT,
+      data_entrega TEXT,
+      FOREIGN KEY (cliente_id) REFERENCES clientes(id),
+      FOREIGN KEY (loja_id) REFERENCES lojas(id),
+      FOREIGN KEY (entregador_id) REFERENCES entregadores(id)
+    )`);
+
+  db.run(`
     CREATE TABLE IF NOT EXISTS entregadores (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       nome TEXT NOT NULL,
