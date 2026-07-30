@@ -57,7 +57,7 @@ body{background:var(--bg);color:var(--texto)}
       <div class="form-group"><label>Email</label><input type="email" id="login-email" placeholder="motoboy@email.com"></div>
       <div class="form-group"><label>Senha</label><input type="password" id="login-senha" placeholder="Sua senha"></div>
       <button class="btn btn-primary" onclick="loginEntregador()">Entrar</button>
-      <div style="text-align:center;padding:16px;font-size:13px;color:var(--texto-sec)">Não tem conta? <a style="color:var(--laranja);font-weight:600;cursor:pointer" onclick="showCadastro()">Cadastre-se como entregador</a></div>
+      <div style="text-align:center;padding:16px;font-size:13px;color:var(--texto-sec)">Não tem conta? <button type="button" style="background:none;border:0;color:var(--laranja);font-weight:600;cursor:pointer;padding:0;font-size:13px" onclick="showCadastro()">Cadastre-se como entregador</button></div>
     </div>
     <div id="cadastro-form" style="display:none">
       <div class="form-group"><label>Nome completo</label><input type="text" id="cad-nome" placeholder="Seu nome"></div>
@@ -232,7 +232,7 @@ async function carregarMinhasEntregas(){
           <button style="background:var(--azul);color:var(--branco);padding:12px;border:none;border-radius:8px;font-weight:600;margin-bottom:8px" onclick="abrirGPS(${p.loja_latitude},${p.loja_longitude},'${p.loja_nome}')">📍 Ir até a loja (GPS)</button>
           <div style="margin:8px 0;padding:12px;background:var(--bg);border-radius:12px;text-align:center;border:1px dashed var(--borda)">
             <p style="font-size:13px;font-weight:600;margin-bottom:8px">📸 Conferiu os itens na loja? Tire a foto da coleta</p>
-            <input type="file" accept="image/*" capture="environment" id="foto-coleta-${p.id}" style="width:100%;margin-bottom:margin-bottom:8px;padding:8px">
+            <input type="file" accept="image/*" capture="environment" id="foto-coleta-${p.id}" style="width:100%;margin-bottom:8px;padding:8px">
             <button style="background:var(--laranja);color:var(--branco);width:100%;padding:12px;border:none;border-radius:8px;font-weight:600;font-size:15px" onclick="enviarFotoColeta(${p.id})">📸 Coletar e Sair pra Entrega</button>
           </div>
           <button style="background:var(--vermelho);color:var(--branco);padding:10px;border:none;border-radius:8px;font-size:14px;margin-top:4px" onclick="recusarPedido(${p.id})">❌ Recusar pedido</button>
@@ -249,7 +249,6 @@ async function carregarMinhasEntregas(){
             <input type="file" accept="image/*" capture="environment" id="foto-entrega-${p.id}" style="width:100%;margin-bottom:8px;padding:8px">
             <button style="background:var(--verde);color:var(--branco);width:100%;padding:12px;border:none;border-radius:8px;font-weight:600;font-size:15px" onclick="enviarFotoEntrega(${p.id})">✅ Finalizar Entrega</button>
           </div>
-        </div>
         </div>
       ` : ''}
       
@@ -298,6 +297,7 @@ async function recusarPedido(id){
   carregarMinhasEntregas();
   carregarDisponiveis();
   carregarSaldo();
+}
 
 function lerFotoComoBase64(file){
   return new Promise((resolve,reject)=>{
