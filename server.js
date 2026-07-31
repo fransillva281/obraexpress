@@ -38,31 +38,49 @@ app.get('/admin/*', (req, res) => {
   res.sendFile(path.join(__dirname, 'admin', 'index.html'));
 });
 
-// Database setup
-const db = new sqlite3.Database('obraexpress.db');
-
-const dbRun = (sql, params = []) => new Promise((resolve, reject) => {
-  db.run(sql, params, function(err) {
-    if (err) reject(err);
-    else resolve(this);
-  });
-});
-
-const dbAll = (sql, params = []) => new Promise((resolve, reject) => {
-  db.all(sql, params, (err, rows) => {
-    if (err) reject(err);
-    else resolve(rows);
-  });
-});
-
-const dbGet = (sql, params = []) => new Promise((resolve, reject) => {
-  db.get(sql, params, (err, row) => {
-    if (err) reject(err);
-    else resolve(row);
-  });
-});
-
-// ============ CREATE TABLES ============
+// Database setup: PostgreSQL no Render; SQLite apenas como fallback local.
+const usePostgres = Boolean(process.env.DATABASE_URL);
+let db, pgPool;
+if (usePostgres) {
+  const { Pool } = require('pg');
+  pgPool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+}
+function pgSql(sql) {
+  let i = 0;
+  return sql.replace(/\?/g, () => '$' + (++i))
+    .replace(/date\(data_pedido\) = date\('now', '-3 hours'\)/gi, "data_pedido::date = (CURRENT_TIMESTAMP - INTERVAL '3 hours')::date");
+}
+const dbRun = (sql, params = []) => {
+  if (usePostgres) {
+    let q = pgSql(sql);
+    const ignore = /INSERT OR IGNORE/i.test(q);
+    q = q.replace(/INSERT OR IGNORE INTO/gi, 'INSERT INTO');
+    if (ignore) q += ' ON CONFLICT DO NOTHING';
+    else if (/^\s*INSERT\s+INTO/i.test(q) && !/RETURNING/i.test(q)) q += ' RETURNING id';
+    return pgPool.query(q, params).then(r => ({ lastID: r.rows[0]?.id, changes: r.rowCount }));
+  }
+  return new Promise((resolve, reject) => db.run(sql, params, function(err) { if (err) reject(err); else resolve(this); }));
+};
+const dbAll = (sql, params = []) => usePostgres ? pgPool.query(pgSql(sql), params).then(r => r.rows) : new Promise((resolve, reject) => db.all(sql, params, (err, rows) => err ? reject(err) : resolve(rows)));
+const dbGet = (sql, params = []) => usePostgres ? pgPool.query(pgSql(sql), params).then(r => r.rows[0]) : new Promise((resolve, reject) => db.get(sql, params, (err, row) => err ? reject(err) : resolve(row)));
+const pgTables = ["CREATE TABLE IF NOT EXISTS lojas (\n      id SERIAL PRIMARY KEY,\n      nome TEXT NOT NULL,\n      cnpj TEXT UNIQUE,\n      email TEXT UNIQUE NOT NULL,\n      senha TEXT NOT NULL,\n      telefone TEXT,\n      whatsapp TEXT,\n      chave_pix TEXT,\n      logo TEXT,\n      endereco TEXT,\n      bairro TEXT,\n      cidade TEXT DEFAULT 'São Luís',\n      estado TEXT DEFAULT 'MA',\n      latitude DOUBLE PRECISION,\n      longitude DOUBLE PRECISION,\n      descricao TEXT,\n      categorias TEXT,\n      taxa_entrega_km DOUBLE PRECISION DEFAULT 2.00,\n      entrega_gratis_ate DOUBLE PRECISION DEFAULT 0,\n      tempo_entrega_min TEXT DEFAULT '30-60 min',\n      aberto INTEGER DEFAULT 1,\n      plano TEXT DEFAULT 'comissao',\n      data_cadastro TEXT DEFAULT ((CURRENT_TIMESTAMP - INTERVAL '3 hours'))\n    )", "CREATE TABLE IF NOT EXISTS produtos (\n      id SERIAL PRIMARY KEY,\n      loja_id INTEGER NOT NULL,\n      nome TEXT NOT NULL,\n      descricao TEXT,\n      preco DOUBLE PRECISION NOT NULL,\n      foto TEXT,\n      categoria TEXT,\n      marca TEXT,\n      unidade TEXT DEFAULT 'un',\n      estoque INTEGER DEFAULT 999,\n      destaque INTEGER DEFAULT 0,\n      ativo INTEGER DEFAULT 1,\n      data_cadastro TEXT DEFAULT ((CURRENT_TIMESTAMP - INTERVAL '3 hours')),\n      FOREIGN KEY (loja_id) REFERENCES lojas(id) ON DELETE CASCADE\n    )", "CREATE TABLE IF NOT EXISTS clientes (\n      id SERIAL PRIMARY KEY,\n      nome TEXT NOT NULL,\n      email TEXT UNIQUE NOT NULL,\n      senha TEXT NOT NULL,\n      telefone TEXT,\n      endereco_padrao TEXT,\n      bairro TEXT,\n      cidade TEXT DEFAULT 'São Luís',\n      estado TEXT DEFAULT 'MA',\n      latitude DOUBLE PRECISION,\n      longitude DOUBLE PRECISION,\n      data_cadastro TEXT DEFAULT ((CURRENT_TIMESTAMP - INTERVAL '3 hours'))\n    )", "CREATE TABLE IF NOT EXISTS pedidos (\n      id SERIAL PRIMARY KEY,\n      cliente_id INTEGER NOT NULL,\n      loja_id INTEGER NOT NULL,\n      entregador_id INTEGER,\n      itens TEXT NOT NULL,\n      total_produtos DOUBLE PRECISION NOT NULL DEFAULT 0,\n      taxa_entrega DOUBLE PRECISION DEFAULT 0,\n      total_final DOUBLE PRECISION NOT NULL DEFAULT 0,\n      tipo_entrega TEXT DEFAULT 'entrega',\n      endereco_entrega TEXT,\n      bairro_entrega TEXT,\n      latitude_entrega DOUBLE PRECISION,\n      longitude_entrega DOUBLE PRECISION,\n      distancia_km DOUBLE PRECISION DEFAULT 0,\n      forma_pagamento TEXT DEFAULT 'pix',\n      observacao TEXT,\n      status TEXT DEFAULT 'aguardando',\n      codigo_retirada TEXT,\n      data_pedido TEXT DEFAULT ((CURRENT_TIMESTAMP - INTERVAL '3 hours')),\n      data_confirmacao TEXT,\n      data_entrega TEXT,\n      FOREIGN KEY (cliente_id) REFERENCES clientes(id),\n      FOREIGN KEY (loja_id) REFERENCES lojas(id)\n    )", "CREATE TABLE IF NOT EXISTS entregadores (\n      id SERIAL PRIMARY KEY,\n      nome TEXT NOT NULL,\n      cpf TEXT UNIQUE,\n      email TEXT UNIQUE NOT NULL,\n      senha TEXT NOT NULL,\n      telefone TEXT,\n      veiculo TEXT,\n      placa TEXT,\n      foto TEXT,\n      chave_pix TEXT,\n      disponivel INTEGER DEFAULT 1,\n      latitude DOUBLE PRECISION,\n      longitude DOUBLE PRECISION,\n      avaliacao DOUBLE PRECISION DEFAULT 5.0,\n      total_entregas INTEGER DEFAULT 0,\n      data_cadastro TEXT DEFAULT ((CURRENT_TIMESTAMP - INTERVAL '3 hours'))\n    )", "CREATE TABLE IF NOT EXISTS saldo_entregadores (\n      id SERIAL PRIMARY KEY,\n      entregador_id INTEGER UNIQUE NOT NULL,\n      saldo DOUBLE PRECISION DEFAULT 0,\n      total_ganho DOUBLE PRECISION DEFAULT 0,\n      total_sacado DOUBLE PRECISION DEFAULT 0,\n      FOREIGN KEY (entregador_id) REFERENCES entregadores(id) ON DELETE CASCADE\n    )", "CREATE TABLE IF NOT EXISTS saldo_plataforma (\n      id SERIAL PRIMARY KEY,\n      descricao TEXT,\n      valor DOUBLE PRECISION NOT NULL,\n      tipo TEXT DEFAULT 'credito',\n      pedido_id INTEGER,\n      data TEXT DEFAULT ((CURRENT_TIMESTAMP - INTERVAL '3 hours'))\n    )", "CREATE TABLE IF NOT EXISTS avaliacoes (\n      id SERIAL PRIMARY KEY,\n      pedido_id INTEGER NOT NULL,\n      cliente_id INTEGER NOT NULL,\n      loja_id INTEGER,\n      entregador_id INTEGER,\n      nota INTEGER NOT NULL CHECK(nota >= 1 AND nota <= 5),\n      comentario TEXT,\n      data TEXT DEFAULT ((CURRENT_TIMESTAMP - INTERVAL '3 hours')),\n      FOREIGN KEY (pedido_id) REFERENCES pedidos(id),\n      FOREIGN KEY (cliente_id) REFERENCES clientes(id)\n    )", "CREATE TABLE IF NOT EXISTS categorias (\n      id SERIAL PRIMARY KEY,\n      nome TEXT NOT NULL,\n      icone TEXT,\n      ordem INTEGER DEFAULT 0\n    )"];
+async function initPostgres() {
+  // A tabela de entregadores vem antes de pedidos para respeitar a referência.
+  const ordered = [...pgTables.filter(x => /CREATE TABLE IF NOT EXISTS entregadores/.test(x)), ...pgTables.filter(x => !/CREATE TABLE IF NOT EXISTS entregadores/.test(x))];
+  for (const sql of ordered) await pgPool.query(sql);
+  const extra = [['separado_por','TEXT'],['foto_coleta','TEXT'],['foto_entrega','TEXT'],['cliente_confirmou','INTEGER DEFAULT 0'],['valor_motoboy','DOUBLE PRECISION DEFAULT 0'],['valor_plataforma','DOUBLE PRECISION DEFAULT 0'],['pix_pago','INTEGER DEFAULT 0'],['data_separado','TEXT'],['data_coleta','TEXT'],['data_saida','TEXT']];
+  for (const [name,type] of extra) await pgPool.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS ${name} ${type}`);
+  const count = await dbGet('SELECT COUNT(*) as count FROM categorias');
+  if (Number(count.count) === 0) {
+    const cats = [['Hidráulica','🔧',1],['Elétrica','⚡',2],['Conexões','🔩',3],['Ferragens','🔨',4],['Acabamento','🏠',5],['Pisos e Revestimentos','🧱',6],['Tintas','🎨',7],['Ferramentas','🛠️',8],['Segurança','🪖',9],['Hidráulica','🚿',10]];
+    for (const c of cats) await dbRun('INSERT INTO categorias (nome, icone, ordem) VALUES (?, ?, ?)', c);
+  }
+}
+const databaseReady = usePostgres ? initPostgres() : Promise.resolve();
+if (!usePostgres) {
+  const sqlite3 = require('sqlite3').verbose();
+  db = new sqlite3.Database('obraexpress.db');
+  // ============ CREATE TABLES ============
 db.serialize(() => {
   db.run(`
     CREATE TABLE IF NOT EXISTS lojas (
@@ -272,6 +290,14 @@ db.serialize(() => {
       stmt.finalize();
     }
   });
+});
+
+
+}
+
+databaseReady.catch(err => { console.error('Falha ao inicializar o banco:', err); process.exit(1); });
+app.use('/api', async (req, res, next) => {
+  try { await databaseReady; next(); } catch { res.status(503).json({ error: 'Banco de dados indisponível' }); }
 });
 
 // ============ MIDDLEWARE ============
