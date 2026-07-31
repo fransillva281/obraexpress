@@ -252,7 +252,10 @@ async function adicionarProduto(){
   };
   if(!d.nome||!d.preco)return toast('Nome e preço são obrigatórios');
   const r=await api('/api/produtos',{method:'POST',body:JSON.stringify({...d,loja_id:loja.id})});
-  if(r.error)return toast(r.error);toast('Produto adicionado!');carregarProdutosLoja();
+  if(r.error)return toast(r.error);
+  if(!r.produto)return toast('O produto não foi confirmado no banco.');
+  toast('Produto adicionado e salvo!');
+  await carregarProdutosLoja();
 }
 
 async function removerProduto(id){
