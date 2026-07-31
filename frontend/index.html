@@ -226,6 +226,7 @@ body{background:var(--bg);color:var(--texto);overflow-x:hidden}
     </div>
   </div>
   <div id="pedidos-list"></div>
+  <button class="btn btn-danger" onclick="excluirMinhaConta()" style="margin:16px">🗑️ Excluir minha conta</button>
 </div>
 
 <!-- ============ DETALHE DO PEDIDO ============ -->
@@ -412,7 +413,7 @@ async function abrirLoja(id) {
   if (r.produtos && r.produtos.length > 0) {
     document.getElementById('loja-produtos').innerHTML = r.produtos.map(p => `
       <div class="product-card">
-        <div class="product-img">${p.foto || '📦'}</div>
+        <div class="product-img">${p.foto ? `<img src="${p.foto}" alt="${p.nome}" style="width:100%;height:100%;object-fit:cover;border-radius:10px">` : '📦'}</div>
         <div class="product-info">
           <h4>${p.nome}</h4>
           <div class="loja-nome">${p.marca || ''}</div>
@@ -440,7 +441,7 @@ async function searchProducts() {
     <div class="section-title">${r.produtos.length} resultado(s)</div>
     <div class="product-grid">${r.produtos.map(p => `
       <div class="product-card">
-        <div class="product-img">${p.foto || '📦'}</div>
+        <div class="product-img">${p.foto ? `<img src="${p.foto}" alt="${p.nome}" style="width:100%;height:100%;object-fit:cover;border-radius:10px">` : '📦'}</div>
         <div class="product-info">
           <h4>${p.nome}</h4>
           <div class="loja-nome">${p.loja_nome || ''}</div>
@@ -853,6 +854,15 @@ async function cadastroCliente() {
   updateAuthUI();
   toast('Conta criada com sucesso! 🎉');
   navigate('home');
+}
+
+async function excluirMinhaConta(){
+  if(!usuario)return toast('Entre na sua conta primeiro');
+  if(!confirm('Excluir sua conta e pedidos? Esta ação não pode ser desfeita.'))return;
+  const r=await api('/api/clientes/'+usuario.id,{method:'DELETE'});
+  if(r.error)return toast(r.error);
+  localStorage.removeItem('obraexpress_cliente'); usuario=null;
+  alert('Conta excluída. Você poderá se cadastrar novamente.'); location.reload();
 }
 
 // ============ INIT ============
