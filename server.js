@@ -832,6 +832,53 @@ app.post('/api/admin/login', async (req, res) => {
   res.status(401).json({ error: 'Credenciais de admin inválidas' });
 });
 
+// Excluir a própria conta e seus dados relacionados
+app.delete('/api/clientes/:id', authCliente, async (req, res) => {
+  if (req.usuario.id != req.params.id) return res.status(403).json({ error: 'Permissão negada' });
+  try {
+    await dbRun('DELETE FROM avaliacoes WHERE cliente_id = ?', [req.params.id]);
+    await dbRun('DELETE FROM pedidos WHERE cliente_id = ?', [req.params.id]);
+    await dbRun('DELETE FROM clientes WHERE id = ?', [req.params.id]);
+    res.json({ success: true, message: 'Conta do cliente excluída. O e-mail pode ser reutilizado.' });
+  } catch (e) { res.status(500).json({ error: 'Não foi possível excluir a conta' }); }
+});
+
+app.delete('/api/entregadores/:id', authEntregador, async (req, res) => {
+  if (req.usuario.id != req.params.id) return res.status(403).json({ error: 'Permissão negada' });
+  try {
+    await dbRun('DELETE FROM avaliacoes WHERE entregador_id = ?', [req.params.id]);
+    await dbRun('DELETE FROM saldo_entregadores WHERE entregador_id = ?', [req.params.id]);
+    await dbRun('UPDATE pedidos SET entregador_id = NULL WHERE entregador_id = ?', [req.params.id]);
+    await dbRun('DELETE FROM entregadores WHERE id = ?', [req.params.id]);
+    res.json({ success: true, message: 'Conta do entregador excluída. O e-mail e CPF podem ser reutilizados.' });
+  } catch (e) { res.status(500).json({ error: 'Não foi possível excluir a conta' }); }
+});
+
+app.delete('/api/lojas/:id', authLojas, async (req, res) => {
+  if (req.usuario.id != req.params.id) return res.status(403).json({ error: 'Permissão negada' });
+  try {
+    const pedidos = await dbAll('SELECT id FROM pedidos WHERE loja_id = ?', [req.params.id]);
+    for (const p of pedidos) await dbRun('DELETE FROM avaliacoes WHERE pedido_id = ?', [p.id]);
+    await dbRun('DELETE FROM pedidos WHERE loja_id = ?', [req.params.id]);
+    await dbRun('DELETE FROM produtos WHERE loja_id = ?', [req.params.id]);
+    await dbRun('DELETE FROM lojas WHERE id = ?', [req.params.id]);
+    res.json({ success: true, message: 'Conta da loja e produtos excluídos. O e-mail pode ser reutilizado.' });
+  } catch (e) { res.status(500).json({ error: 'Não foi possível excluir a conta da loja' }); }
+});
+
+// Limpeza autorizada das contas e dados de teste, somente pelo administrador
+app.post('/api/admin/limpar-dados-teste', authAdmin, async (req, res) => {
+  try {
+    for (const sql of [
+      'DELETE FROM avaliacoes', 'DELETE FROM saldo_plataforma',
+      'DELETE FROM saldo_entregadores', 'DELETE FROM pedidos',
+      'DELETE FROM produtos', 'DELETE FROM lojas',
+      'DELETE FROM clientes', 'DELETE FROM entregadores'
+    ]) await dbRun(sql);
+    res.json({ success: true, message: 'Todos os dados de teste foram excluídos. E-mails, CPFs e CNPJs podem ser reutilizados.' });
+  } catch (e) { console.error('Limpeza de teste:', e); res.status(500).json({ error: 'A limpeza não foi concluída' }); }
+});
+
 app.get('/api/admin/dashboard', authAdmin, async (req, res) => {
   const totalLojas = await dbGet('SELECT COUNT(*) as total FROM lojas');
   const totalEntregadores = await dbGet('SELECT COUNT(*) as total FROM entregadores');
