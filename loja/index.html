@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -222,8 +223,11 @@ async function carregarProdutosLoja(){
   el.innerHTML=`
     <div style="padding:0 16px">${adicionarProdutoForm()}</div>
     ${r.produtos.map(p=>`
-      <div class="card" style="display:flex;justify-content:space-between;align-items:center">
-        <div><h3>${p.nome}</h3><div class="meta">R$ ${p.preco.toFixed(2)} • ${p.marca||''} • ${p.categoria||''}</div></div>
+      <div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+        <div style="display:flex;align-items:center;gap:10px">
+          ${p.foto ? `<img src="${p.foto}" style="width:58px;height:58px;object-fit:cover;border-radius:8px">` : '<div style="font-size:36px">📦</div>'}
+          <div><h3>${p.nome}</h3><div class="meta">R$ ${Number(p.preco).toFixed(2)} • ${p.marca||''} • ${p.categoria||''}</div></div>
+        </div>
         <button style="background:#C62828;color:var(--branco);border:none;padding:6px 12px;border-radius:6px;cursor:pointer" onclick="removerProduto(${p.id})">🗑️</button>
       </div>
     `).join('')}
@@ -238,9 +242,20 @@ function adicionarProdutoForm(){
       <div class="form-group" style="padding:0;margin-bottom:8px"><label>Preço (R$)</label><input type="number" id="novo-produto-preco" step="0.01" placeholder="15.90"></div>
       <div class="form-group" style="padding:0;margin-bottom:8px"><label>Marca (opcional)</label><input type="text" id="novo-produto-marca" placeholder="Tigre/Amanco"></div>
       <div class="form-group" style="padding:0;margin-bottom:8px"><label>Categoria</label><input type="text" id="novo-produto-categoria" placeholder="Hidráulica"></div>
+      <div class="form-group" style="padding:0;margin-bottom:8px"><label>Imagem do produto (opcional)</label><input type="file" id="novo-produto-foto" accept="image/jpeg,image/png,image/webp" onchange="previsualizarProduto(event)" style="width:100%;padding:8px"><div id="preview-produto" style="margin-top:8px"></div></div>
       <button class="btn btn-primary btn-sm" style="padding:10px;margin:0" onclick="adicionarProduto()">➕ Adicionar</button>
     </div>
   `;
+}
+
+let fotoProdutoSelecionada = '';
+function previsualizarProduto(event){
+  const file=event.target.files[0];
+  if(!file)return;
+  if(file.size>2*1024*1024){ toast('A imagem deve ter no máximo 2 MB'); event.target.value=''; return; }
+  const reader=new FileReader();
+  reader.onload=()=>{ fotoProdutoSelecionada=reader.result; document.getElementById('preview-produto').innerHTML='<img src="'+fotoProdutoSelecionada+'" style="width:100px;height:100px;object-fit:cover;border-radius:10px">'; };
+  reader.readAsDataURL(file);
 }
 
 async function adicionarProduto(){
@@ -248,7 +263,8 @@ async function adicionarProduto(){
     nome:document.getElementById('novo-produto-nome').value,
     preco:parseFloat(document.getElementById('novo-produto-preco').value)||0,
     marca:document.getElementById('novo-produto-marca').value,
-    categoria:document.getElementById('novo-produto-categoria').value
+    categoria:document.getElementById('novo-produto-categoria').value,
+    foto:fotoProdutoSelecionada || null
   };
   if(!d.nome||!d.preco)return toast('Nome e preço são obrigatórios');
   const r=await api('/api/produtos',{method:'POST',body:JSON.stringify({...d,loja_id:loja.id})});
@@ -272,8 +288,9 @@ function carregarPerfilLoja(){
       <div class="meta">📧 ${loja.email}</div>
       <div class="meta">🛵 R$ ${loja.taxa_entrega_km}/km</div>
     </div>
+    <button class="btn" onclick="excluirMinhaConta()" style="color:#c62828;border:1px solid #c62828;margin-bottom:16px">🗑️ Excluir minha conta e produtos</button>
     <div class="card">
-      <h3>📊 Estatísticas</h3>
+      <h3>📊 Estatísticas</h3
       <div class="meta" id="stats-loja">Carregando...</div>
     </div>
   `;
@@ -289,6 +306,14 @@ function carregarPerfilLoja(){
       `;
     }
   });
+}
+
+async function excluirMinhaConta(){
+  if(!confirm('Excluir a loja, produtos e pedidos? Esta ação não pode ser desfeita.'))return;
+  const r=await api('/api/lojas/'+loja.id,{method:'DELETE'});
+  if(r.error)return toast(r.error);
+  localStorage.removeItem('loja_token');localStorage.removeItem('loja');
+  alert('Loja excluída. O e-mail poderá ser reutilizado.'); location.reload();
 }
 
 // Init
