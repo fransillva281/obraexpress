@@ -414,8 +414,18 @@ app.put('/api/lojas/:id', authLojas, async (req, res) => {
 app.post('/api/produtos', authLojas, async (req, res) => {
   const { loja_id, nome, descricao, preco, foto, categoria, marca, unidade, estoque } = req.body;
   if (req.usuario.id != loja_id) return res.status(403).json({ error: 'Permissão negada' });
-  const result = await dbRun('INSERT INTO produtos (loja_id, nome, descricao, preco, foto, categoria, marca, unidade, estoque) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [loja_id, nome, descricao, preco, foto, categoria, marca, unidade, estoque || 999]);
-  res.json({ success: true, id: result.lastID });
+  if (!nome || !preco || Number(preco) <= 0) return res.status(400).json({ error: 'Informe o nome e um preço válido' });
+  try {
+    const loja = await dbGet('SELECT id FROM lojas WHERE id = ?', [loja_id]);
+    if (!loja) return res.status(404).json({ error: 'A loja desta sessão não foi encontrada no banco atual. Faça o cadastro novamente.' });
+    const result = await dbRun('INSERT INTO produtos (loja_id, nome, descricao, preco, foto, categoria, marca, unidade, estoque) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [loja_id, nome, descricao || null, Number(preco), foto || null, categoria || null, marca || null, unidade || 'un', estoque || 999]);
+    const produto = await dbGet('SELECT * FROM produtos WHERE id = ?', [result.lastID]);
+    if (!produto) return res.status(500).json({ error: 'O produto não foi confirmado no banco de dados' });
+    res.json({ success: true, id: result.lastID, produto });
+  } catch (e) {
+    console.error('Erro ao cadastrar produto:', e);
+    res.status(500).json({ error: 'Não foi possível salvar o produto. Tente novamente.' });
+  }
 });
 
 app.put('/api/produtos/:id', authLojas, async (req, res) => {
