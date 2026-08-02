@@ -78,6 +78,7 @@ body{background:var(--bg);color:var(--texto)}
   <div class="header"><h1>🛵 <span id="entregador-header-name">Painel</span></h1><div class="sub">Suas entregas e saldo</div></div>
   
   <div id="saldo-container"></div>
+  <div id="gps-status" class="card" style="border-left:4px solid var(--azul);display:none"></div>
   
   <div class="tabs">
     <button class="tab active" onclick="switchTab('disponiveis',this)">🆕 Disponíveis</button>
@@ -93,6 +94,35 @@ body{background:var(--bg);color:var(--texto)}
 const API = '';
 let token = localStorage.getItem('entregador_token');
 let entregador = JSON.parse(localStorage.getItem('entregador') || 'null');
+let gpsWatchId = null;
+let ultimaLocalizacao = null;
+
+function atualizarGpsStatus(html, mostrar=true){
+  const el=document.getElementById('gps-status');
+  if(el){el.innerHTML=html;el.style.display=mostrar?'block':'none';}
+}
+
+function iniciarGPS(){
+  if(!entregador || !token)return;
+  if(!navigator.geolocation){
+    atualizarGpsStatus('⚠️ Este celular não oferece localização GPS.'); return;
+  }
+  atualizarGpsStatus('📍 <strong>GPS ativando...</strong><br><small>Permita o acesso à localização quando o celular pedir.</small>');
+  gpsWatchId=navigator.geolocation.watchPosition(async pos=>{
+    const {latitude,longitude,accuracy}=pos.coords;
+    ultimaLocalizacao={latitude,longitude,accuracy};
+    const r=await api('/api/entregadores/'+entregador.id+'/localizacao',{method:'PUT',body:JSON.stringify({latitude,longitude})});
+    if(r.error){atualizarGpsStatus('⚠️ Não foi possível atualizar o GPS.');return;}
+    atualizarGpsStatus('✅ <strong>GPS ativo</strong><br><small>Localização atualizada • precisão aproximada: '+Math.round(accuracy||0)+' m</small>');
+  }, err=>{
+    const mensagens={1:'Permissão de localização negada. Ative o GPS nas configurações do celular.',2:'Não foi possível localizar o celular.',3:'O GPS demorou para responder.'};
+    atualizarGpsStatus('⚠️ '+(mensagens[err.code]||'Verifique o GPS do celular.'));
+  }, {enableHighAccuracy:true,maximumAge:10000,timeout:20000});
+}
+
+function pararGPS(){
+  if(gpsWatchId!==null && navigator.geolocation){navigator.geolocation.clearWatch(gpsWatchId);gpsWatchId=null;}
+}
 
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',3000);}
 async function api(path,opts={}){const h={'Content-Type':'application/json'};if(token)h['Authorization']='Bearer '+token;try{const r=await fetch(API+path,{...opts,headers:h});return await r.json()}catch(e){return{error:e.message}}}
@@ -110,6 +140,7 @@ async function loginEntregador(){
   localStorage.setItem('entregador_token',token);localStorage.setItem('entregador',JSON.stringify(entregador));
   document.getElementById('entregador-header-name').textContent=entregador.nome;
   toast('Bem-vindo, '+entregador.nome+'!');entrarDashboard();
+  iniciarGPS();
 }
 
 async function cadastroEntregador(){
@@ -130,6 +161,7 @@ async function cadastroEntregador(){
   localStorage.setItem('entregador_token',token);localStorage.setItem('entregador',JSON.stringify(entregador));
   document.getElementById('entregador-header-name').textContent=entregador.nome;
   toast('Cadastro realizado!');entrarDashboard();
+  iniciarGPS();
 }
 
 function entrarDashboard(){
@@ -323,6 +355,7 @@ function carregarPerfil(){
       <div class="meta" id="stats-entregador">Carregando...</div>
     </div>
     <button class="btn btn-outline" onclick="sair()" style="margin:16px">🚪 Sair</button>
+    <button class="btn" onclick="excluirMinhaConta()" style="margin:0 16px 16px;color:#c62828;border:1px solid #c62828">🗑️ Excluir minha conta</button>
   `;
   api('/api/entregadores/'+entregador.id+'/saldo').then(r=>{
     if(r.saldo){
@@ -333,6 +366,14 @@ function carregarPerfil(){
       `;
     }
   });
+}
+
+async function excluirMinhaConta(){
+  if(!confirm('Excluir sua conta e todos os seus dados? Esta ação não pode ser desfeita.'))return;
+  const r=await api('/api/entregadores/'+entregador.id,{method:'DELETE'});
+  if(r.error)return toast(r.error);
+  localStorage.removeItem('entregador_token');localStorage.removeItem('entregador');
+  alert('Conta excluída. Você poderá se cadastrar novamente.'); location.reload();
 }
 
 function sair(){
@@ -347,6 +388,7 @@ function sair(){
 if(entregador){
   document.getElementById('entregador-header-name').textContent=entregador.nome;
   entrarDashboard();
+  iniciarGPS();
 }
 </script>
 <script>
