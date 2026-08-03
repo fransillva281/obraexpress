@@ -34,6 +34,10 @@ body{background:var(--bg);color:var(--texto)}
 .form-group input,.form-group select{width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:14px}
 .login-box{max-width:360px;margin:100px auto;padding:24px;background:var(--branco);border-radius:16px;box-shadow:0 4px 12px rgba(0,0,0,.1)}
 .login-box h2{text-align:center;margin-bottom:20px;color:var(--laranja)}
+.login-message{display:none;background:#FFF3E0;color:var(--laranja-escuro);border-radius:8px;padding:10px;margin-bottom:12px;font-size:13px;text-align:center}
+.session-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--branco);border-radius:12px;padding:10px 12px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.session-bar span{font-size:12px;color:var(--texto-sec)}
+.btn-logout{background:#FFEBEE;color:var(--vermelho);border:1px solid #FFCDD2}
 .tab-bar{display:flex;gap:4px;margin-bottom:16px;overflow-x:auto}
 .tab-bar .tab{padding:10px 16px;border-radius:8px;background:var(--branco);cursor:pointer;font-size:13px;font-weight:600;white-space:nowrap;border:1px solid #eee}
 .tab-bar .tab.active{background:var(--laranja);color:var(--branco);border-color:var(--laranja)}
@@ -55,6 +59,7 @@ body{background:var(--bg);color:var(--texto)}
   <!-- Login -->
   <div id="page-login" class="login-box">
     <h2>🔐 Admin</h2>
+    <div id="login-message" class="login-message"></div>
     <div class="form-group">
       <label>Email</label>
       <input type="email" id="login-email" placeholder="E-mail administrativo">
@@ -68,6 +73,10 @@ body{background:var(--bg);color:var(--texto)}
 
   <!-- Dashboard -->
   <div id="page-dashboard" style="display:none">
+    <div class="session-bar">
+      <span>🔒 Acesso administrativo protegido</span>
+      <button class="btn btn-sm btn-logout" onclick="sair()">🚪 Sair</button>
+    </div>
     <div class="tab-bar">
       <div class="tab active" onclick="mudarAba('dashboard',this)">📊 Dashboard</div>
       <div class="tab" onclick="mudarAba('pedidos',this)">📋 Pedidos</div>
@@ -133,11 +142,39 @@ body{background:var(--bg);color:var(--texto)}
 const API = '';
 let token = localStorage.getItem('obraexpress_admin_token');
 
-function api(path, opts={}) {
+async function api(path, opts={}) {
   opts.headers = opts.headers || {};
   if (token) opts.headers['Authorization'] = 'Bearer ' + token;
   opts.headers['Content-Type'] = 'application/json';
-  return fetch(API + path, opts).then(r => r.json());
+  try {
+    const resposta = await fetch(API + path, opts);
+    const dados = await resposta.json().catch(() => ({error:'Resposta inválida do servidor'}));
+    if ((resposta.status === 401 || resposta.status === 403) && path !== '/api/admin/login') {
+      encerrarSessao('Sua sessão venceu. Entre novamente para continuar.');
+      return {error:'Sessão expirada'};
+    }
+    return dados;
+  } catch {
+    return {error:'Não foi possível conectar ao servidor'};
+  }
+}
+
+function mostrarLogin(mensagem='') {
+  document.getElementById('page-dashboard').style.display = 'none';
+  document.getElementById('page-login').style.display = 'block';
+  const aviso = document.getElementById('login-message');
+  aviso.textContent = mensagem;
+  aviso.style.display = mensagem ? 'block' : 'none';
+}
+
+function encerrarSessao(mensagem='') {
+  token = null;
+  localStorage.removeItem('obraexpress_admin_token');
+  mostrarLogin(mensagem);
+}
+
+function sair() {
+  encerrarSessao('Você saiu do painel administrativo com segurança.');
 }
 
 async function login() {
@@ -152,6 +189,7 @@ async function login() {
     localStorage.setItem('obraexpress_admin_token', token);
     document.getElementById('page-login').style.display = 'none';
     document.getElementById('page-dashboard').style.display = 'block';
+    document.getElementById('login-message').style.display = 'none';
     carregarDashboard();
   } else {
     alert('Credenciais inválidas!');
@@ -160,12 +198,13 @@ async function login() {
 
 async function carregarDashboard() {
   const r = await api('/api/admin/dashboard');
+  if (r.error) return;
   document.getElementById('stat-lojas').textContent = r.lojas;
   document.getElementById('stat-entregadores').textContent = r.entregadores;
   document.getElementById('stat-clientes').textContent = r.clientes;
   document.getElementById('stat-pedidos-hoje').textContent = r.pedidosHoje;
   document.getElementById('stat-pendentes').textContent = r.pedidosPendentes;
-  document.getElementById('stat-faturamento').textContent = 'R$ ' + (r.faturamento || 0).toFixed(2);
+  document.getElementById('stat-faturamento').textContent = 'R$ ' + Number(r.faturamento || 0).toFixed(2);
   
   if (r.ultimosPedidos) {
     const statusLabels = {
@@ -188,6 +227,7 @@ async function carregarDashboard() {
 async function carregarPedidos(status) {
   const url = status ? '/api/admin/pedidos?status='+status : '/api/admin/pedidos';
   const r = await api(url);
+  if (r.error) return;
   const statusLabels = {
     'aguardando_confirmacao': '⏳ Cliente confirmando', 'aguardando': '⏳ Aguardando loja', 'confirmado': '✅ Confirmado',
     'separado': '🟣 Separado', 'saiu_entrega': '🛵 Saiu p/ entrega',
@@ -207,7 +247,8 @@ async function carregarPedidos(status) {
 
 async function carregarFinanceiro() {
   const r = await api('/api/admin/financeiro');
-  document.getElementById('total-plataforma').textContent = 'R$ ' + (r.totalPlataforma || 0).toFixed(2);
+  if (r.error) return;
+  document.getElementById('total-plataforma').textContent = 'R$ ' + Number(r.totalPlataforma || 0).toFixed(2);
   
   if (r.saldoEntregadores) {
     document.getElementById('saldos-entregadores').innerHTML = r.saldoEntregadores.map(e => `
@@ -253,11 +294,13 @@ function mudarAba(aba, el) {
   if (aba === 'financeiro') carregarFinanceiro();
 }
 
-// Auto login
+// Auto login: o servidor confirma se o token salvo ainda é válido.
 if (token) {
   document.getElementById('page-login').style.display = 'none';
   document.getElementById('page-dashboard').style.display = 'block';
   carregarDashboard();
+} else {
+  mostrarLogin();
 }
 </script>
 </body>

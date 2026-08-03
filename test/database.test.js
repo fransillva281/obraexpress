@@ -61,6 +61,15 @@ test('cliente possui categorias em grade e busca por produto, loja ou categoria'
   assert.match(servidor, /categorias ILIKE \?/);
 });
 
+test('painel administrativo trata sessão vencida e permite sair', () => {
+  const admin = fs.readFileSync(path.join(__dirname, '..', 'admin', 'index.html'), 'utf8');
+  assert.match(admin, /onclick="sair\(\)"/);
+  assert.match(admin, /function encerrarSessao/);
+  assert.match(admin, /localStorage\.removeItem\('obraexpress_admin_token'\)/);
+  assert.match(admin, /resposta\.status === 401/);
+  assert.match(admin, /Sua sessão venceu/);
+});
+
 test('aplica comissão inicial de 10% no plano Entrega ObraExpress', () => {
   const calculo = calcularFinanceiroPedido({
     totalProdutos: 100,
