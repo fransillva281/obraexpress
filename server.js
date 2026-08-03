@@ -146,9 +146,12 @@ app.get('/api/lojas', async (req, res) => {
   const { categoria, bairro, busca } = req.query;
   let sql = 'SELECT id, nome, logo, descricao, categorias, endereco, bairro, taxa_entrega_km, entrega_gratis_ate, tempo_entrega_min, aberto, latitude, longitude, plano, comissao_percentual FROM lojas WHERE aberto = 1';
   const params = [];
-  if (categoria) { sql += ' AND categorias LIKE ?'; params.push(`%${categoria}%`); }
-  if (bairro) { sql += ' AND bairro LIKE ?'; params.push(`%${bairro}%`); }
-  if (busca) { sql += ' AND (nome LIKE ? OR descricao LIKE ?)'; params.push(`%${busca}%`, `%${busca}%`); }
+  if (categoria) { sql += ' AND categorias ILIKE ?'; params.push(`%${categoria}%`); }
+  if (bairro) { sql += ' AND bairro ILIKE ?'; params.push(`%${bairro}%`); }
+  if (busca) {
+    sql += ' AND (nome ILIKE ? OR descricao ILIKE ? OR categorias ILIKE ? OR bairro ILIKE ?)';
+    params.push(`%${busca}%`, `%${busca}%`, `%${busca}%`, `%${busca}%`);
+  }
   sql += ' ORDER BY nome';
   const lojas = await dbAll(sql, params);
   res.json({ lojas });
@@ -157,7 +160,14 @@ app.get('/api/lojas', async (req, res) => {
 app.get('/api/lojas/:id', async (req, res) => {
   const loja = await dbGet('SELECT id, nome, logo, descricao, categorias, endereco, bairro, cidade, estado, telefone, whatsapp, chave_pix, taxa_entrega_km, entrega_gratis_ate, tempo_entrega_min, aberto, latitude, longitude, plano, comissao_percentual FROM lojas WHERE id = ?', [req.params.id]);
   if (!loja) return res.status(404).json({ error: 'Loja não encontrada' });
-  const produtos = await dbAll('SELECT * FROM produtos WHERE loja_id = ? AND ativo = 1 ORDER BY destaque DESC, nome', [req.params.id]);
+  const produtos = await dbAll(`SELECT p.*,
+    CASE WHEN EXISTS (
+      SELECT 1 FROM categorias c
+      WHERE LOWER(TRIM(c.nome)) = LOWER(TRIM(p.categoria))
+        AND COALESCE(c.ativa, 1) = 1
+    ) THEN 1 ELSE 0 END AS categoria_disponivel
+    FROM produtos p WHERE p.loja_id = ? AND p.ativo = 1
+    ORDER BY p.destaque DESC, p.nome`, [req.params.id]);
   res.json({ loja, produtos });
 });
 
@@ -197,7 +207,7 @@ app.post('/api/produtos', authLojas, async (req, res) => {
   try {
     const loja = await dbGet('SELECT id FROM lojas WHERE id = ?', [loja_id]);
     if (!loja) return res.status(404).json({ error: 'A loja desta sessão não foi encontrada no banco atual. Faça o cadastro novamente.' });
-    const categoriaOficial = await dbGet('SELECT nome FROM categorias WHERE LOWER(TRIM(nome)) = LOWER(TRIM(?))', [categoria]);
+    const categoriaOficial = await dbGet('SELECT nome FROM categorias WHERE LOWER(TRIM(nome)) = LOWER(TRIM(?)) AND COALESCE(ativa, 1) = 1', [categoria]);
     if (!categoriaOficial) return res.status(400).json({ error: 'Categoria inválida. Escolha uma opção da lista.' });
     const result = await dbRun('INSERT INTO produtos (loja_id, nome, descricao, preco, foto, categoria, marca, unidade, estoque) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [loja_id, nome, descricao || null, Number(preco), foto || null, categoriaOficial.nome, marca || null, unidade || 'un', estoque || 999]);
     const produto = await dbGet('SELECT * FROM produtos WHERE id = ?', [result.lastID]);
@@ -220,7 +230,7 @@ app.put('/api/produtos/:id', authLojas, async (req, res) => {
   if (preco !== undefined) { updates.push('preco = ?'); params.push(preco); }
   if (foto !== undefined) { updates.push('foto = ?'); params.push(foto); }
   if (categoria !== undefined) {
-    const categoriaOficial = await dbGet('SELECT nome FROM categorias WHERE LOWER(TRIM(nome)) = LOWER(TRIM(?))', [categoria]);
+    const categoriaOficial = await dbGet('SELECT nome FROM categorias WHERE LOWER(TRIM(nome)) = LOWER(TRIM(?)) AND COALESCE(ativa, 1) = 1', [categoria]);
     if (!categoriaOficial) return res.status(400).json({ error: 'Categoria inválida. Escolha uma opção da lista.' });
     updates.push('categoria = ?'); params.push(categoriaOficial.nome);
   }
@@ -245,13 +255,18 @@ app.delete('/api/produtos/:id', authLojas, async (req, res) => {
 
 app.get('/api/produtos', async (req, res) => {
   const { categoria, loja_id, busca, ordem } = req.query;
-  let sql = 'SELECT p.*, l.nome as loja_nome, l.logo as loja_logo, l.bairro as loja_bairro FROM produtos p JOIN lojas l ON p.loja_id = l.id WHERE p.ativo = 1 AND l.aberto = 1';
+  let sql = `SELECT p.*, l.nome as loja_nome, l.logo as loja_logo, l.bairro as loja_bairro
+    FROM produtos p
+    JOIN lojas l ON p.loja_id = l.id
+    JOIN categorias c ON LOWER(TRIM(c.nome)) = LOWER(TRIM(p.categoria))
+      AND COALESCE(c.ativa, 1) = 1
+    WHERE p.ativo = 1 AND l.aberto = 1`;
   const params = [];
   if (categoria) { sql += ' AND LOWER(TRIM(p.categoria)) = LOWER(TRIM(?))'; params.push(categoria); }
   if (loja_id) { sql += ' AND p.loja_id = ?'; params.push(loja_id); }
   if (busca) {
-    sql += ' AND (p.nome ILIKE ? OR p.descricao ILIKE ? OR p.marca ILIKE ? OR p.categoria ILIKE ?)';
-    params.push(`%${busca}%`, `%${busca}%`, `%${busca}%`, `%${busca}%`);
+    sql += ' AND (p.nome ILIKE ? OR p.descricao ILIKE ? OR p.marca ILIKE ? OR p.categoria ILIKE ? OR l.nome ILIKE ?)';
+    params.push(`%${busca}%`, `%${busca}%`, `%${busca}%`, `%${busca}%`, `%${busca}%`);
   }
   sql += ordem === 'menor_preco'
     ? ' ORDER BY p.preco ASC, p.nome ASC, l.nome ASC'
@@ -746,7 +761,7 @@ app.post('/api/avaliacoes', authCliente, async (req, res) => {
 
 // ============ CATEGORIAS ============
 app.get('/api/categorias', async (req, res) => {
-  const categorias = await dbAll('SELECT * FROM categorias ORDER BY ordem');
+  const categorias = await dbAll('SELECT * FROM categorias WHERE COALESCE(ativa, 1) = 1 ORDER BY ordem');
   res.json({ categorias });
 });
 

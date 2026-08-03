@@ -33,6 +33,9 @@ test('catálogo oficial possui 19 categorias diferentes e proteção contra repe
   assert.equal(nomes.length, 19);
   assert.equal(new Set(nomes.map(nome => nome.toLocaleLowerCase('pt-BR'))).size, 19);
   assert.match(schema, /CREATE UNIQUE INDEX IF NOT EXISTS categorias_nome_unico/);
+  assert.match(schema, /UPDATE categorias SET ativa = 0/);
+  assert.match(schema, /Parafusos, Porcas e Arruelas/);
+  assert.doesNotMatch(insert[1], /Cimento e Argamassa|Areia e Brita|Tijolos e Blocos/);
 });
 
 test('comparação de produtos e alertas sonoros estão presentes nos painéis', () => {
@@ -44,6 +47,18 @@ test('comparação de produtos e alertas sonoros estão presentes nos painéis',
   assert.match(cliente, /MENOR PREÇO DA LISTA/);
   assert.match(loja, /alerta-som-loja/);
   assert.match(entregador, /alerta-som-entregador/);
+});
+
+test('cliente possui categorias em grade e busca por produto, loja ou categoria', () => {
+  const raiz = path.join(__dirname, '..');
+  const cliente = fs.readFileSync(path.join(raiz, 'frontend', 'index.html'), 'utf8');
+  const servidor = fs.readFileSync(path.join(raiz, 'server.js'), 'utf8');
+  assert.match(cliente, /class="category-grid"/);
+  assert.match(cliente, /Busque por produto, loja ou categoria/);
+  assert.match(cliente, /api\('\/api\/lojas\?busca=/);
+  assert.match(cliente, /renderResultadosBusca/);
+  assert.match(servidor, /l\.nome ILIKE \?/);
+  assert.match(servidor, /categorias ILIKE \?/);
 });
 
 test('aplica comissão inicial de 10% no plano Entrega ObraExpress', () => {

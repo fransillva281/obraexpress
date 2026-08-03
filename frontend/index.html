@@ -11,8 +11,8 @@
 <link rel="apple-touch-icon" href="/icon-192.png">
 <style>
 *{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
-:root{--laranja:#E65100;--laranja-escuro:#BF360C;--laranja-claro:#FFF3E0;--cinza:#37474F;--bg:#F5F5F5;--branco:#fff;--texto:#212121;--texto-sec:#757575;--borda:#E0E0E0;--verde:#2E7D32;--vermelho:#C62828}
-body{background:var(--bg);color:var(--texto);overflow-x:hidden}
+:root{--laranja:#E65100;--laranja-escuro:#BF360C;--laranja-claro:#FFF3E0;--azul:#10333F;--azul-claro:#E8F4F6;--cinza:#37474F;--bg:#F5F7F8;--branco:#fff;--texto:#172126;--texto-sec:#68777E;--borda:#E0E6E8;--verde:#2E7D32;--vermelho:#C62828}
+body{background:linear-gradient(180deg,#F7FAFB 0%,var(--bg) 45%);color:var(--texto);overflow-x:hidden}
 .pages{display:none;min-height:100vh;padding-bottom:80px}
 .pages.active{display:block}
 .header{background:var(--laranja);color:var(--branco);padding:16px;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,.15)}
@@ -24,14 +24,34 @@ body{background:var(--bg);color:var(--texto);overflow-x:hidden}
 .search-box{background:var(--branco);margin:12px 16px;border-radius:12px;padding:10px 16px;display:flex;align-items:center;gap:10px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
 .search-box input{flex:1;border:none;outline:none;font-size:15px;background:transparent}
 .search-box .icon{font-size:20px;color:var(--texto-sec)}
-.cat-scroll{overflow-x:auto;padding:0 16px;margin:12px 0;white-space:nowrap;-webkit-overflow-scrolling:touch}
-.cat-scroll::-webkit-scrollbar{display:none}
-.cat-item{display:inline-flex;vertical-align:top;flex-direction:column;align-items:center;justify-content:center;margin-right:10px;padding:12px 10px;background:var(--branco);border:2px solid transparent;border-radius:16px;box-shadow:0 2px 8px rgba(0,0,0,.07);cursor:pointer;width:104px;min-height:94px;white-space:normal;transition:.2s}
+.home-hero{background:linear-gradient(135deg,#0B2A34 0%,#155061 60%,#E65100 150%);color:var(--branco);padding:24px 16px 30px;border-radius:0 0 30px 30px;box-shadow:0 12px 30px rgba(16,51,63,.2)}
+.home-hero-inner{max-width:1160px;margin:0 auto}
+.hero-main{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.hero-kicker{display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.16);border-radius:20px;padding:6px 10px;font-size:10px;font-weight:800;letter-spacing:.7px;text-transform:uppercase}
+.hero-main h1{font-size:28px;line-height:1;margin:12px 0 7px}
+.hero-main p{font-size:13px;line-height:1.4;max-width:520px;color:rgba(255,255,255,.8)}
+.hero-mark{width:72px;height:72px;display:flex;align-items:center;justify-content:center;border-radius:24px;background:linear-gradient(145deg,#FF8A3D,#E65100);font-size:34px;box-shadow:0 12px 24px rgba(0,0,0,.2);transform:rotate(3deg);flex-shrink:0}
+.hero-search{margin:20px 0 14px;background:var(--branco);border-radius:16px;padding:14px 16px;display:flex;align-items:center;gap:10px;box-shadow:0 10px 24px rgba(0,0,0,.18);cursor:text}
+.hero-search .icon{font-size:21px}
+.hero-search input{width:100%;border:0;outline:0;background:transparent;font-size:14px;color:var(--texto);cursor:text}
+.hero-pills{display:flex;gap:8px;flex-wrap:wrap}
+.hero-pills span{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.13);border-radius:20px;padding:6px 9px;font-size:10px;font-weight:700}
+.home-content{max-width:1160px;margin:0 auto;padding:8px 0 28px}
+.section-heading{padding:22px 16px 10px;display:flex;align-items:end;justify-content:space-between;gap:10px}
+.section-heading h2{font-size:19px;color:var(--azul);margin-bottom:2px}
+.section-heading p{font-size:11px;color:var(--texto-sec)}
+.section-badge{font-size:10px;font-weight:800;color:var(--laranja);background:var(--laranja-claro);padding:6px 9px;border-radius:18px;white-space:nowrap}
+.category-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:0 16px}
+.cat-item{position:relative;overflow:hidden;display:flex;flex-direction:column;align-items:flex-start;justify-content:space-between;padding:15px;background:var(--branco);border:1px solid rgba(16,51,63,.08);border-radius:19px;box-shadow:0 6px 18px rgba(16,51,63,.07);cursor:pointer;min-height:116px;transition:.2s}
+.cat-item::after{content:'';position:absolute;width:68px;height:68px;border-radius:50%;right:-24px;bottom:-25px;background:linear-gradient(145deg,rgba(230,81,0,.13),rgba(230,81,0,.02))}
 .cat-item:hover{border-color:var(--laranja);transform:translateY(-2px)}
 .cat-item:active{transform:scale(.95)}
-.cat-item .icon{font-size:30px;margin-bottom:6px}
-.cat-item .name{font-size:11px;line-height:1.2;font-weight:700;color:var(--cinza);text-align:center}
-.store-card{background:var(--branco);border-radius:16px;margin:8px 16px;padding:16px;display:flex;gap:12px;box-shadow:0 1px 3px rgba(0,0,0,.06);cursor:pointer;transition:.2s}
+.cat-item .icon{display:flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:14px;background:var(--laranja-claro);font-size:24px;margin-bottom:12px}
+.cat-item .name{position:relative;z-index:1;font-size:12px;line-height:1.25;font-weight:800;color:var(--azul);text-align:left}
+.cat-item:nth-child(3n+2) .icon{background:var(--azul-claro)}
+.cat-item:nth-child(3n) .icon{background:#EDF7ED}
+.stores-grid{display:grid;grid-template-columns:1fr;gap:12px;padding:0 16px}
+.store-card{background:var(--branco);border-radius:18px;padding:16px;display:flex;gap:12px;border:1px solid rgba(16,51,63,.07);box-shadow:0 6px 18px rgba(16,51,63,.06);cursor:pointer;transition:.2s}
 .store-card:active{transform:scale(.98)}
 .store-logo{width:56px;height:56px;border-radius:12px;background:var(--laranja-claro);display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0}
 .store-info{flex:1}
@@ -51,6 +71,11 @@ body{background:var(--bg);color:var(--texto);overflow-x:hidden}
 .comparison-header{background:var(--branco);margin:10px 16px 12px;padding:14px;border-radius:14px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
 .comparison-header h3{font-size:16px;margin-bottom:3px}
 .comparison-header p{font-size:12px;color:var(--texto-sec)}
+.search-section{padding:2px 16px 14px}
+.search-section-title{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:10px 0;font-size:15px;color:var(--azul)}
+.search-section-title span{font-size:10px;color:var(--texto-sec);font-weight:600}
+.search-category-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.search-category{border:1px solid #FFD5B8;background:var(--laranja-claro);color:var(--laranja-escuro);border-radius:12px;padding:10px;text-align:left;font-size:11px;font-weight:800;cursor:pointer}
 .product-card.best-price{border:2px solid var(--verde);position:relative}
 .best-price-badge{display:inline-block;background:#E8F5E9;color:var(--verde);font-size:10px;font-weight:800;padding:4px 7px;border-radius:8px;margin-bottom:6px}
 .btn{display:block;width:100%;padding:14px;border:none;border-radius:12px;font-size:16px;font-weight:600;cursor:pointer;transition:.2s;text-align:center;text-decoration:none}
@@ -118,24 +143,58 @@ body{background:var(--bg);color:var(--texto);overflow-x:hidden}
 .bottom-nav .badge-num{position:absolute;top:-6px;right:-10px;background:var(--laranja);color:var(--branco);font-size:10px;font-weight:700;width:18px;height:18px;border-radius:50%;display:none;align-items:center;justify-content:center}
 .toast{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:var(--cinza);color:var(--branco);padding:12px 24px;border-radius:12px;font-size:14px;z-index:9999;opacity:0;transition:.3s;pointer-events:none;white-space:nowrap}
 .toast.show{opacity:1}
+@media (min-width:620px){
+  .category-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .stores-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .product-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .search-category-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@media (min-width:940px){
+  .home-hero{padding-top:34px;padding-bottom:38px}
+  .hero-main h1{font-size:38px}
+  .hero-main p{font-size:15px}
+  .hero-mark{width:92px;height:92px;font-size:45px}
+  .category-grid{grid-template-columns:repeat(5,minmax(0,1fr));gap:15px}
+  .cat-item{min-height:128px}
+  .stores-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .product-grid{grid-template-columns:repeat(4,minmax(0,1fr));max-width:1160px;margin:0 auto}
+  .search-category-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+}
 </style>
 </head>
 <body>
 
 <!-- ============ HOME ============ -->
 <div id="page-home" class="pages active">
-  <div class="header">
-    <h1>🏪 ObraExpress</h1>
-    <div class="sub">Materiais de construção na sua obra</div>
+  <div class="home-hero">
+    <div class="home-hero-inner">
+      <div class="hero-main">
+        <div>
+          <span class="hero-kicker">⚡ Entrega rápida para sua obra</span>
+          <h1>ObraExpress</h1>
+          <p>Encontre produtos leves, compare preços entre lojas e receba com praticidade.</p>
+        </div>
+        <div class="hero-mark">🛵</div>
+      </div>
+      <div class="hero-search" onclick="abrirBuscaHome()">
+        <span class="icon">🔍</span>
+        <input type="text" id="search-input" placeholder="Busque por produto, loja ou categoria" readonly aria-label="Abrir busca">
+      </div>
+      <div class="hero-pills"><span>✓ Compare preços</span><span>✓ Lojas locais</span><span>✓ Entrega de moto</span></div>
+    </div>
   </div>
-  <div class="search-box" onclick="navigate('busca')">
-    <span class="icon">🔍</span>
-    <input type="text" id="search-input" placeholder="Buscar produtos..." readonly>
+  <div class="home-content">
+    <div class="section-heading">
+      <div><h2>Categorias</h2><p>Escolha uma opção para comparar os menores preços</p></div>
+      <span class="section-badge">Itens leves</span>
+    </div>
+    <div class="category-grid" id="categorias-list"></div>
+    <div class="section-heading">
+      <div><h2>Lojas disponíveis</h2><p>Veja produtos e condições de cada fornecedor</p></div>
+      <span class="section-badge">🏪 Perto de você</span>
+    </div>
+    <div id="lojas-list" class="stores-grid"></div>
   </div>
-  <div class="section-title">📂 Categorias</div>
-  <div class="cat-scroll" id="categorias-list"></div>
-  <div class="section-title">🏪 Lojas próximas</div>
-  <div id="lojas-list"></div>
 </div>
 
 <!-- ============ BUSCA ============ -->
@@ -148,7 +207,7 @@ body{background:var(--bg);color:var(--texto);overflow-x:hidden}
   </div>
   <div class="search-box" style="margin:12px 16px;box-shadow:0 1px 3px rgba(0,0,0,.08)">
     <span class="icon">🔍</span>
-    <input type="text" id="search-input-page" placeholder="Cimento, tijolo, areia..." oninput="searchProducts()" autofocus>
+    <input type="text" id="search-input-page" placeholder="Produto, loja ou categoria..." oninput="searchProducts()" autocomplete="off" autofocus>
   </div>
   <div id="search-context"></div>
   <div id="search-results"></div>
@@ -325,6 +384,16 @@ let usuario = JSON.parse(localStorage.getItem('obraexpress_cliente'));
 let cart = JSON.parse(localStorage.getItem('cart') || '[]');
 let lojaAtual = null;
 let categoriaAtiva = '';
+let categoriasCache = [];
+let searchTimer = null;
+
+function escaparHtml(valor) {
+  return String(valor ?? '').replace(/[&<>"]/g, caractere => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[caractere]));
+}
+
+function normalizarTexto(valor) {
+  return String(valor ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+}
 
 // ============ API ============
 async function api(path, opts = {}) {
@@ -371,12 +440,26 @@ async function renderHome() {
 async function renderCategorias() {
   const r = await api('/api/categorias');
   if (!r.categorias) return;
-  document.getElementById('categorias-list').innerHTML = r.categorias.map(c => `
-    <div class="cat-item" onclick="buscarCategoria('${c.nome}')">
+  categoriasCache = r.categorias;
+  document.getElementById('categorias-list').innerHTML = categoriasCache.map(c => `
+    <div class="cat-item" onclick="buscarCategoria('${c.nome.replace(/'/g,"\\'")}')">
       <span class="icon">${c.icone || '📦'}</span>
-      <span class="name">${c.nome}</span>
+      <span class="name">${escaparHtml(c.nome)}</span>
     </div>
   `).join('');
+}
+
+function lojaCardHtml(l) {
+  const categorias = (l.categorias || '').split(',').map(c => c.trim()).filter(Boolean).slice(0,3);
+  return `
+    <div class="store-card" onclick="abrirLoja(${Number(l.id)})">
+      <div class="store-logo">${l.logo || '🏪'}</div>
+      <div class="store-info">
+        <h3>${escaparHtml(l.nome)}</h3>
+        <div class="meta">${escaparHtml(l.bairro || 'Atendimento local')} • 🛵 a partir de R$ ${Number(l.taxa_entrega_km || 2).toFixed(2)}/km</div>
+        <div class="tags">${categorias.map(c => `<span class="tag">${escaparHtml(c)}</span>`).join('')}</div>
+      </div>
+    </div>`;
 }
 
 async function renderLojas() {
@@ -385,16 +468,12 @@ async function renderLojas() {
     document.getElementById('lojas-list').innerHTML = `<div class="empty-state"><div class="icon">🏪</div><h3>Nenhuma loja disponível</h3></div>`;
     return;
   }
-  document.getElementById('lojas-list').innerHTML = r.lojas.map(l => `
-    <div class="store-card" onclick="abrirLoja(${l.id})">
-      <div class="store-logo">${l.logo || '🏪'}</div>
-      <div class="store-info">
-        <h3>${l.nome}</h3>
-        <div class="meta">${l.bairro || ''} • 🛵 a partir de R$ ${(l.taxa_entrega_km || 2).toFixed(2)}/km</div>
-        <div class="tags">${(l.categorias || '').split(',').slice(0,3).map(c => `<span class="tag">${c.trim()}</span>`).join('')}</div>
-      </div>
-    </div>
-  `).join('');
+  document.getElementById('lojas-list').innerHTML = r.lojas.map(lojaCardHtml).join('');
+}
+
+function abrirBuscaHome() {
+  navigate('busca');
+  setTimeout(() => document.getElementById('search-input-page')?.focus(), 80);
 }
 
 function buscarCategoria(cat) {
@@ -425,14 +504,15 @@ async function abrirLoja(id) {
       </div>
     </div>
   `;
-  if (r.produtos && r.produtos.length > 0) {
-    document.getElementById('loja-produtos').innerHTML = r.produtos.map(p => `
+  const produtosDisponiveis = (r.produtos || []).filter(p => Number(p.categoria_disponivel ?? 1) === 1);
+  if (produtosDisponiveis.length > 0) {
+    document.getElementById('loja-produtos').innerHTML = produtosDisponiveis.map(p => `
       <div class="product-card">
         <div class="product-img">${p.foto ? `<img src="${p.foto}" alt="${p.nome}" style="width:100%;height:100%;object-fit:cover;border-radius:10px">` : '📦'}</div>
         <div class="product-info">
           <h4>${p.nome}</h4>
           <div class="loja-nome">${p.marca || ''}</div>
-          <div class="preco">R$ ${p.preco.toFixed(2)}</div>
+          <div class="preco">R$ ${Number(p.preco).toFixed(2)}</div>
           <button class="btn-add" onclick="addToCart(${p.id},'${p.nome.replace(/'/g,"\\'")}',${p.preco},${l.id},'${l.nome.replace(/'/g,"\\'")}')">+ Adicionar</button>
         </div>
       </div>
@@ -445,15 +525,79 @@ async function abrirLoja(id) {
 
 // ============ BUSCA ============
 async function searchProducts() {
-  const q = document.getElementById('search-input-page').value;
+  const q = document.getElementById('search-input-page').value.trim();
   categoriaAtiva = '';
+  clearTimeout(searchTimer);
   if (!q) {
     document.getElementById('search-context').innerHTML = '';
-    document.getElementById('search-results').innerHTML = '';
+    document.getElementById('search-results').innerHTML = `<div class="empty-state"><div class="icon">🔎</div><h3>O que você procura?</h3><p>Digite o nome de um produto, loja ou categoria</p></div>`;
     return;
   }
-  const r = await api('/api/produtos?busca=' + encodeURIComponent(q) + '&ordem=menor_preco');
-  renderComparacaoProdutos(r.produtos || [], `Busca: ${q}`);
+  searchTimer = setTimeout(() => executarBusca(q), 250);
+}
+
+async function executarBusca(q) {
+  const categoriasRequest = categoriasCache.length ? Promise.resolve({categorias: categoriasCache}) : api('/api/categorias');
+  const [produtosResposta, lojasResposta, categoriasResposta] = await Promise.all([
+    api('/api/produtos?busca=' + encodeURIComponent(q) + '&ordem=menor_preco'),
+    api('/api/lojas?busca=' + encodeURIComponent(q)),
+    categoriasRequest
+  ]);
+  if (document.getElementById('search-input-page').value.trim() !== q) return;
+  categoriasCache = categoriasResposta.categorias || categoriasCache;
+  const termo = normalizarTexto(q);
+  const categorias = categoriasCache.filter(c => normalizarTexto(c.nome).includes(termo));
+  renderResultadosBusca(produtosResposta.produtos || [], lojasResposta.lojas || [], categorias, q);
+}
+
+function renderResultadosBusca(produtos, lojas, categorias, termo) {
+  const context = document.getElementById('search-context');
+  const results = document.getElementById('search-results');
+  const total = produtos.length + lojas.length + categorias.length;
+  context.innerHTML = `
+    <div class="comparison-header">
+      <h3>🔍 Resultados para “${escaparHtml(termo)}”</h3>
+      <p>${total} resultado(s) • produtos organizados do menor preço para o maior</p>
+    </div>`;
+
+  if (!total) {
+    results.innerHTML = `<div class="empty-state"><div class="icon">🔍</div><h3>Nada encontrado</h3><p>Tente outro nome de produto, loja ou categoria</p></div>`;
+    return;
+  }
+
+  const categoriasHtml = categorias.length ? `
+    <section class="search-section">
+      <div class="search-section-title">Categorias <span>${categorias.length} encontrada(s)</span></div>
+      <div class="search-category-grid">${categorias.map(c => `
+        <button class="search-category" onclick="buscarCategoria('${c.nome.replace(/'/g,"\\'")}')">${c.icone || '📦'} ${escaparHtml(c.nome)}</button>
+      `).join('')}</div>
+    </section>` : '';
+
+  const lojasHtml = lojas.length ? `
+    <section class="search-section">
+      <div class="search-section-title">Lojas <span>${lojas.length} encontrada(s)</span></div>
+      <div class="stores-grid" style="padding:0">${lojas.map(lojaCardHtml).join('')}</div>
+    </section>` : '';
+
+  const produtosHtml = produtos.length ? `
+    <section class="search-section">
+      <div class="search-section-title">Produtos <span>${produtos.length} encontrado(s)</span></div>
+      <div class="product-grid" style="padding:0">${produtos.map((p, index) => `
+        <div class="product-card ${index === 0 ? 'best-price' : ''}">
+          <div class="product-img">${p.foto ? `<img src="${p.foto}" alt="${escaparHtml(p.nome)}" style="width:100%;height:100%;object-fit:cover;border-radius:10px">` : '📦'}</div>
+          <div class="product-info">
+            ${index === 0 ? '<span class="best-price-badge">✓ MENOR PREÇO DA LISTA</span>' : ''}
+            <h4>${escaparHtml(p.nome)}</h4>
+            <div class="loja-nome">🏪 ${escaparHtml(p.loja_nome || '')}${p.loja_bairro ? ` • ${escaparHtml(p.loja_bairro)}` : ''}</div>
+            <div class="loja-nome">${escaparHtml(p.categoria || '')}</div>
+            <div class="preco">R$ ${Number(p.preco).toFixed(2)}</div>
+            <button class="btn-add" onclick="addToCart(${p.id},'${p.nome.replace(/'/g,"\\'")}',${p.preco},${p.loja_id},'${(p.loja_nome||'').replace(/'/g,"\\'")}')">+ Adicionar</button>
+          </div>
+        </div>
+      `).join('')}</div>
+    </section>` : '';
+
+  results.innerHTML = categoriasHtml + lojasHtml + produtosHtml;
 }
 
 function renderComparacaoProdutos(produtos, titulo) {

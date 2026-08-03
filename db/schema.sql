@@ -166,8 +166,11 @@ CREATE TABLE IF NOT EXISTS categorias (
   id SERIAL PRIMARY KEY,
   nome TEXT NOT NULL,
   icone TEXT,
-  ordem INTEGER DEFAULT 0
+  ordem INTEGER DEFAULT 0,
+  ativa INTEGER DEFAULT 1
 );
+
+ALTER TABLE categorias ADD COLUMN IF NOT EXISTS ativa INTEGER DEFAULT 1;
 
 ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS separado_por TEXT;
 ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS foto_coleta TEXT;
@@ -226,50 +229,66 @@ WHERE repetida.id > original.id
 CREATE UNIQUE INDEX IF NOT EXISTS categorias_nome_unico
   ON categorias (LOWER(TRIM(nome)));
 
+-- O catálogo inicial aceita somente itens leves, adequados para entrega de moto.
+-- As categorias antigas não são apagadas: ficam inativas para uma futura
+-- modalidade de entrega com carro, utilitário ou caminhão.
+UPDATE categorias SET ativa = 0;
+
 WITH catalogo(nome, icone, ordem) AS (VALUES
   ('Hidráulica', '🔧', 1),
   ('Elétrica', '⚡', 2),
-  ('Conexões', '🔩', 3),
-  ('Ferragens', '🔨', 4),
-  ('Cimento e Argamassa', '🏗️', 5),
-  ('Areia e Brita', '🪨', 6),
-  ('Tijolos e Blocos', '🧱', 7),
-  ('Pisos e Revestimentos', '◼️', 8),
+  ('Conexões Hidráulicas', '🔩', 3),
+  ('Parafusos, Porcas e Arruelas', '🔩', 4),
+  ('Buchas, Chumbadores e Fixadores', '🧰', 5),
+  ('Fechaduras, Dobradiças e Travas', '🔐', 6),
+  ('Brocas, Discos e Lixas', '⚙️', 7),
+  ('Acessórios de Pintura', '🖌️', 8),
   ('Tintas', '🎨', 9),
   ('Ferramentas', '🛠️', 10),
-  ('Segurança', '🪖', 11),
-  ('Portas e Janelas', '🚪', 12),
-  ('Telhas e Coberturas', '🏠', 13),
-  ('Madeira', '🪵', 14),
-  ('Iluminação', '💡', 15),
-  ('Banheiro e Cozinha', '🚿', 16),
-  ('Jardinagem', '🌱', 17),
-  ('Impermeabilização', '💧', 18),
-  ('Acabamento', '🏡', 19)
+  ('Segurança e EPI', '🪖', 11),
+  ('Iluminação', '💡', 12),
+  ('Banheiro e Cozinha', '🚿', 13),
+  ('Jardinagem', '🌱', 14),
+  ('Mantas e Impermeabilização', '💧', 15),
+  ('Colas, Selantes e Vedação', '🧴', 16),
+  ('Medição e Marcação', '📏', 17),
+  ('Acabamento e Reparos', '🏡', 18),
+  ('Limpeza Pós-Obra', '🧹', 19)
 )
 UPDATE categorias
-SET icone = catalogo.icone, ordem = catalogo.ordem
+SET icone = catalogo.icone, ordem = catalogo.ordem, ativa = 1
 FROM catalogo
 WHERE LOWER(TRIM(categorias.nome)) = LOWER(TRIM(catalogo.nome));
 
 INSERT INTO categorias (nome, icone, ordem) VALUES
   ('Hidráulica', '🔧', 1),
   ('Elétrica', '⚡', 2),
-  ('Conexões', '🔩', 3),
-  ('Ferragens', '🔨', 4),
-  ('Cimento e Argamassa', '🏗️', 5),
-  ('Areia e Brita', '🪨', 6),
-  ('Tijolos e Blocos', '🧱', 7),
-  ('Pisos e Revestimentos', '◼️', 8),
+  ('Conexões Hidráulicas', '🔩', 3),
+  ('Parafusos, Porcas e Arruelas', '🔩', 4),
+  ('Buchas, Chumbadores e Fixadores', '🧰', 5),
+  ('Fechaduras, Dobradiças e Travas', '🔐', 6),
+  ('Brocas, Discos e Lixas', '⚙️', 7),
+  ('Acessórios de Pintura', '🖌️', 8),
   ('Tintas', '🎨', 9),
   ('Ferramentas', '🛠️', 10),
-  ('Segurança', '🪖', 11),
-  ('Portas e Janelas', '🚪', 12),
-  ('Telhas e Coberturas', '🏠', 13),
-  ('Madeira', '🪵', 14),
-  ('Iluminação', '💡', 15),
-  ('Banheiro e Cozinha', '🚿', 16),
-  ('Jardinagem', '🌱', 17),
-  ('Impermeabilização', '💧', 18),
-  ('Acabamento', '🏡', 19)
+  ('Segurança e EPI', '🪖', 11),
+  ('Iluminação', '💡', 12),
+  ('Banheiro e Cozinha', '🚿', 13),
+  ('Jardinagem', '🌱', 14),
+  ('Mantas e Impermeabilização', '💧', 15),
+  ('Colas, Selantes e Vedação', '🧴', 16),
+  ('Medição e Marcação', '📏', 17),
+  ('Acabamento e Reparos', '🏡', 18),
+  ('Limpeza Pós-Obra', '🧹', 19)
 ON CONFLICT DO NOTHING;
+
+UPDATE categorias SET ativa = 1
+WHERE LOWER(TRIM(nome)) IN (
+  'hidráulica', 'elétrica', 'conexões hidráulicas',
+  'parafusos, porcas e arruelas', 'buchas, chumbadores e fixadores',
+  'fechaduras, dobradiças e travas', 'brocas, discos e lixas',
+  'acessórios de pintura', 'tintas', 'ferramentas', 'segurança e epi',
+  'iluminação', 'banheiro e cozinha', 'jardinagem',
+  'mantas e impermeabilização', 'colas, selantes e vedação',
+  'medição e marcação', 'acabamento e reparos', 'limpeza pós-obra'
+);
