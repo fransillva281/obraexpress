@@ -81,6 +81,7 @@ body{background:var(--bg);color:var(--texto)}
       <div class="tab active" onclick="mudarAba('dashboard',this)">📊 Dashboard</div>
       <div class="tab" onclick="mudarAba('pedidos',this)">📋 Pedidos</div>
       <div class="tab" onclick="mudarAba('financeiro',this)">💰 Financeiro</div>
+      <div class="tab" onclick="mudarAba('entregas',this)">🧭 Entregas</div>
     </div>
 
     <!-- Aba Dashboard -->
@@ -127,12 +128,30 @@ body{background:var(--bg);color:var(--texto)}
         <div id="saldos-entregadores"></div>
       </div>
       <div class="card">
-        <h3>🏪 Saldo calculado das Lojas — comissão 10%</h3>
+        <h3>🏪 Saldo calculado das Lojas — 5% promocional; depois 7%</h3>
         <div id="saldos-lojas"></div>
       </div>
       <div class="card">
         <h3>📊 Histórico Plataforma</h3>
         <div id="historico-plataforma"></div>
+      </div>
+    </div>
+
+    <!-- Aba Entregas -->
+    <div id="aba-entregas" style="display:none">
+      <div class="card">
+        <h3>🧭 Frete e GPS</h3>
+        <p class="info" style="margin-bottom:12px">O valor é fechado antes do pedido: base + distância, com adicionais limitados. Horário de pico automático: 11h–14h e 17h–20h.</p>
+        <div class="form-group"><label>Valor inicial do frete (R$)</label><input type="number" id="cfg-frete-base" min="0" step="0.01"></div>
+        <div class="form-group"><label>Valor por quilômetro (R$)</label><input type="number" id="cfg-valor-km" min="0" step="0.01"></div>
+        <div class="form-group"><label>Fator de aproximação da rota</label><input type="number" id="cfg-fator-rota" min="1" step="0.05"></div>
+        <div class="form-group"><label>Adicional de chuva (%)</label><input type="number" id="cfg-chuva" min="0" step="1"></div>
+        <div class="form-group"><label>Adicional de horário de pico (%)</label><input type="number" id="cfg-pico" min="0" step="1"></div>
+        <div class="form-group"><label>Limite máximo dos adicionais (%)</label><input type="number" id="cfg-limite" min="0" step="1"></div>
+        <div class="form-group"><label>Condição climática atual</label><select id="cfg-clima"><option value="normal">☀️ Normal</option><option value="chuva">🌧️ Chuva — aplicar adicional</option><option value="perigoso">⚠️ Perigoso — pausar entregas</option></select></div>
+        <div class="form-group"><label>Entregas</label><select id="cfg-entregas"><option value="1">✅ Ativas</option><option value="0">⛔ Pausadas</option></select></div>
+        <button class="btn btn-primary" onclick="salvarConfiguracoesEntrega()">Salvar configuração de entrega</button>
+        <div id="cfg-status" class="info" style="margin-top:8px"></div>
       </div>
     </div>
   </div>
@@ -257,7 +276,7 @@ async function carregarFinanceiro() {
           <span><strong>🛵 ${e.entregador_nome}</strong></span>
           <span style="color:var(--verde);font-weight:700">R$ ${e.saldo.toFixed(2)}</span>
         </div>
-        <div class="info">💰 Total ganho: R$ ${e.total_ganho.toFixed(2)} • Pix: ${e.chave_pix || 'Não cadastrou'}</div>
+        <div class="info">💰 Total ganho: R$ ${e.total_ganho.toFixed(2)} • Taxa ObraExpress: ${Number(e.comissao_percentual||5).toFixed(0)}% • Pix: ${e.chave_pix || 'Não cadastrou'}</div>
       </div>
     `).join('');
   }
@@ -268,7 +287,7 @@ async function carregarFinanceiro() {
         <span><strong>🏪 ${l.loja_nome}</strong></span>
         <span style="color:var(--verde);font-weight:700">R$ ${Number(l.saldo||0).toFixed(2)}</span>
       </div>
-      <div class="info">Plano: ${l.plano==='loja'?'Loja — entrega própria':'Entrega ObraExpress'} • Comissão: ${Number(l.comissao_percentual||10).toFixed(0)}% • Pix: ${l.chave_pix || 'Não cadastrou'}</div>
+      <div class="info">Plano: ${l.plano==='loja'?'Loja — entrega própria':'Entrega ObraExpress'} • Comissão: ${Number(l.comissao_percentual||5).toFixed(0)}% • Pix: ${l.chave_pix || 'Não cadastrou'}</div>
     </div>
   `).join('') || '<div class="info">Nenhuma loja com venda concluída.</div>';
   
@@ -285,6 +304,36 @@ async function carregarFinanceiro() {
   }
 }
 
+async function carregarConfiguracoesEntrega(){
+  const r=await api('/api/admin/configuracoes-entrega');
+  if(r.error)return;
+  const c=r.configuracao;
+  document.getElementById('cfg-frete-base').value=Number(c.frete_base);
+  document.getElementById('cfg-valor-km').value=Number(c.valor_km);
+  document.getElementById('cfg-fator-rota').value=Number(c.fator_rota);
+  document.getElementById('cfg-chuva').value=Number(c.adicional_chuva_percentual);
+  document.getElementById('cfg-pico').value=Number(c.adicional_pico_percentual);
+  document.getElementById('cfg-limite').value=Number(c.limite_adicionais_percentual);
+  document.getElementById('cfg-clima').value=c.condicao_climatica;
+  document.getElementById('cfg-entregas').value=Number(c.entregas_ativas)?'1':'0';
+  document.getElementById('cfg-status').textContent=r.horario_pico?'🟠 Horário de pico ativo agora.':'🟢 Fora do horário de pico agora.';
+}
+
+async function salvarConfiguracoesEntrega(){
+  const d={
+    frete_base:Number(document.getElementById('cfg-frete-base').value),
+    valor_km:Number(document.getElementById('cfg-valor-km').value),
+    fator_rota:Number(document.getElementById('cfg-fator-rota').value),
+    adicional_chuva_percentual:Number(document.getElementById('cfg-chuva').value),
+    adicional_pico_percentual:Number(document.getElementById('cfg-pico').value),
+    limite_adicionais_percentual:Number(document.getElementById('cfg-limite').value),
+    condicao_climatica:document.getElementById('cfg-clima').value,
+    entregas_ativas:document.getElementById('cfg-entregas').value==='1'
+  };
+  const r=await api('/api/admin/configuracoes-entrega',{method:'PUT',body:JSON.stringify(d)});
+  document.getElementById('cfg-status').textContent=r.error?'⚠️ '+r.error:'✅ Configuração salva. Os próximos pedidos usarão os novos valores.';
+}
+
 function mudarAba(aba, el) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
@@ -292,6 +341,7 @@ function mudarAba(aba, el) {
   document.getElementById('aba-'+aba).style.display = 'block';
   if (aba === 'pedidos') carregarPedidos('');
   if (aba === 'financeiro') carregarFinanceiro();
+  if (aba === 'entregas') carregarConfiguracoesEntrega();
 }
 
 // Auto login: o servidor confirma se o token salvo ainda é válido.

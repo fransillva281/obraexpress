@@ -8,13 +8,22 @@ function normalizarPlanoLoja(plano) {
   return PLANOS_LOJA.has(plano) ? plano : 'entrega_obraexpress';
 }
 
+function calcularPercentualPromocional(inicioPromocao, agora = new Date()) {
+  if (!inicioPromocao) return 5;
+  const inicio = new Date(inicioPromocao);
+  if (Number.isNaN(inicio.getTime())) return 5;
+  const fimPromocao = new Date(inicio);
+  fimPromocao.setUTCMonth(fimPromocao.getUTCMonth() + 5);
+  return agora < fimPromocao ? 5 : 7;
+}
+
 function calcularFinanceiroPedido({
   totalProdutos,
   taxaEntrega,
   tipoEntrega,
   planoLoja,
-  comissaoPercentual = 10,
-  percentualEntregador = 85
+  comissaoPercentual = 5,
+  percentualEntregador = 95
 }) {
   const produtos = arredondarDinheiro(totalProdutos);
   const entrega = tipoEntrega === 'entrega' ? arredondarDinheiro(taxaEntrega) : 0;
@@ -42,6 +51,7 @@ function calcularFinanceiroPedido({
 
 module.exports = {
   arredondarDinheiro,
+  calcularPercentualPromocional,
   calcularFinanceiroPedido,
   normalizarPlanoLoja
 };

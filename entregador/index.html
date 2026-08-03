@@ -161,6 +161,21 @@ function pararGPS(){
   if(gpsWatchId!==null && navigator.geolocation){navigator.geolocation.clearWatch(gpsWatchId);gpsWatchId=null;}
 }
 
+function distanciaEntreKm(lat1,lng1,lat2,lng2){
+  if([lat1,lng1,lat2,lng2].some(v=>v===null||v===undefined||v===''))return null;
+  if(![lat1,lng1,lat2,lng2].every(v=>Number.isFinite(Number(v))))return null;
+  const rad=v=>Number(v)*Math.PI/180,R=6371;
+  const dLat=rad(Number(lat2)-Number(lat1)),dLng=rad(Number(lng2)-Number(lng1));
+  const a=Math.sin(dLat/2)**2+Math.cos(rad(lat1))*Math.cos(rad(lat2))*Math.sin(dLng/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+function textoDistanciaColeta(p){
+  if(!ultimaLocalizacao)return 'Ative o GPS para ver a distância até a loja';
+  const km=distanciaEntreKm(ultimaLocalizacao.latitude,ultimaLocalizacao.longitude,p.loja_latitude,p.loja_longitude);
+  return km===null?'Loja ainda não cadastrou o GPS':`Você está a cerca de ${km.toFixed(1)} km da loja`;
+}
+
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',3000);}
 async function api(path,opts={}){const h={'Content-Type':'application/json'};if(token)h['Authorization']='Bearer '+token;try{const r=await fetch(API+path,{...opts,headers:h});return await r.json()}catch(e){return{error:e.message}}}
 
@@ -240,6 +255,7 @@ async function carregarSaldo(){
         <span>✅ Total ganho: R$ ${saldo.total_ganho.toFixed(2)}</span>
         <span>💳 Sacado: R$ ${saldo.total_sacado.toFixed(2)}</span>
       </div>
+      <div style="font-size:12px;opacity:.9;margin-top:9px">Você recebe ${(100-Number(entregador.comissao_percentual||5)).toFixed(0)}% do frete; a ObraExpress fica com ${Number(entregador.comissao_percentual||5).toFixed(0)}%. Após 5 meses da primeira entrega, a taxa passa para 7%.</div>
     </div>
   `;
 }
@@ -268,12 +284,14 @@ async function carregarDisponiveis(){
       </div>
       <h3 style="text-align:center;margin:8px 0">🏪 ${p.loja_nome}</h3>
       <div class="valor-entrega">💰 R$ ${(p.valor_motoboy||0).toFixed(2)}</div>
+      <div class="meta" style="text-align:center">Você recebe ${(100-Number(p.comissao_entrega_percentual||5)).toFixed(0)}% do frete • ObraExpress ${Number(p.comissao_entrega_percentual||5).toFixed(0)}%</div>
       
       <div class="info-rotas">
         <strong>📍 Coleta:</strong> ${p.loja_endereco||'Não informado'}<br>
         <strong>📍 Entrega:</strong> ${p.cliente_endereco||p.endereco_entrega||'Não informado'}<br>
         <strong>👤 Cliente:</strong> ${p.cliente_nome} ${p.cliente_telefone ? '• 📞 '+p.cliente_telefone : ''}<br>
-        <strong>📦 ${p.tipo_entrega==='entrega'?'🛵 Entrega':'🏪 Retirada'}</strong>
+        <strong>📏 ${Number(p.distancia_km||0).toFixed(1)} km da loja ao cliente</strong><br>
+        <strong>🧭 ${textoDistanciaColeta(p)}</strong>
       </div>
       
       <div class="actions">
@@ -316,7 +334,7 @@ async function carregarMinhasEntregas(){
             <div style="font-size:32px;margin-bottom:4px">📍</div>
             <p style="font-size:14px;font-weight:600;color:var(--verde);align-items:center;display:flex;gap:4px;justify-content:center">Pedido aceito! Vá até a loja</p>
           </div>
-          <button style="background:var(--azul);color:var(--branco);padding:12px;border:none;border-radius:8px;font-weight:600;margin-bottom:8px" onclick="abrirGPS(${p.loja_latitude},${p.loja_longitude},'${p.loja_nome}')">📍 Ir até a loja (GPS)</button>
+          <button style="background:var(--azul);color:var(--branco);padding:12px;border:none;border-radius:8px;font-weight:600;margin-bottom:8px" onclick="abrirGPS(${p.loja_latitude},${p.loja_longitude})">📍 Rota 1: ir até a loja</button>
           <div style="margin:8px 0;padding:12px;background:var(--bg);border-radius:12px;text-align:center;border:1px dashed var(--borda)">
             <p style="font-size:13px;font-weight:600;margin-bottom:8px">📸 Conferiu os itens na loja? Tire a foto da coleta</p>
             <input type="file" accept="image/*" capture="environment" id="foto-coleta-${p.id}" style="width:100%;margin-bottom:8px;padding:8px">
@@ -330,7 +348,7 @@ async function carregarMinhasEntregas(){
         <div class="actions" style="flex-direction:column">
           ${p.foto_coleta ? `<div style="text-align:center;margin-bottom:8px"><img src="${p.foto_coleta}" style="width:100%;max-width:200px;border-radius:8px"><div class="meta">✅ Coleta registrada • Pedido conferido</div></div>` : ''}
           <div style="text-align:center;margin:4px"><div style="font-size:32px">🛵</div><p style="font-size:14px;font-weight:600;color:var(--verde)">A caminho do cliente!</p></div>
-          <button style="background:var(--verde);color:var(--branco);padding:12px;border:none;border-radius:8px;font-weight:600;margin:8px 0" onclick="abrirGPS(${p.cliente_latitude},${p.cliente_longitude},'${p.cliente_nome}')">📍 Ir até o cliente (GPS)</button>
+          <button style="background:var(--verde);color:var(--branco);padding:12px;border:none;border-radius:8px;font-weight:600;margin:8px 0" onclick="abrirGPS(${p.cliente_latitude},${p.cliente_longitude})">📍 Rota 2: ir até o cliente</button>
           <div style="margin:8px 0;padding:12px;background:var(--bg);border-radius:12px;text-align:center;border:1px dashed var(--borda)">
             <p style="font-size:13px;font-weight:600;margin-bottom:8px">📸 Tire a foto da entrega para finalizar</p>
             <input type="file" accept="image/*" capture="environment" id="foto-entrega-${p.id}" style="width:100%;margin-bottom:8px;padding:8px">
@@ -349,9 +367,10 @@ async function carregarMinhasEntregas(){
   `).join('');
 }
 
-function abrirGPS(lat, lng, nome){
-  if(!lat||!lng)return toast('Localização não disponível');
-  const url=`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
+function abrirGPS(lat, lng){
+  if(!Number.isFinite(Number(lat))||!Number.isFinite(Number(lng)))return toast('Localização não disponível');
+  const origem=ultimaLocalizacao?`&origin=${ultimaLocalizacao.latitude},${ultimaLocalizacao.longitude}`:'';
+  const url=`https://www.google.com/maps/dir/?api=1${origem}&destination=${lat},${lng}&travelmode=driving`;
   window.open(url,'_blank');
 }
 

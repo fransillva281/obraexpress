@@ -24,15 +24,9 @@ O sistema já vem com **PWA (Progressive Web App)**. Isso significa que:
 - O app fica na tela inicial **igual um app baixado da loja**
 - Funciona offline, rápido, usa câmera, GPS
 
-### 🅱️ Google Play Store (Próximo passo)
-- **Custo:** Taxa única de US$ 25 (~R$ 140)
-- Depois de publicado, entra no Google Play
-- Aparece nas buscas
-- Pessoas baixam como qualquer app
+### 🅱️ Lojas de aplicativos (etapa futura)
 
-### 🅲️ Apple App Store (Depois)
-- **Custo:** US$ 99/ano (~R$ 550/ano)
-- Para usuários de iPhone
+A publicação poderá ser estudada depois. Ela exige contas próprias, verificação e atendimento às regras atuais de cada loja de aplicativos.
 
 ---
 
@@ -50,15 +44,13 @@ Para instalar no celular:
 
 ---
 
-## 🛒 COMO PUBLICAR NA GOOGLE PLAY
+## 📍 COMO ATIVAR O GPS
 
-1. Crie conta em play.google.com/console (US$ 25)
-2. Use PWABuilder.com (ferramenta grátis) pra gerar o APK
-3. Envie o arquivo .aab
-4. Preencha descrição, fotos, categoria (Compras)
-5. Publica! Em 1-2 dias está no ar
-
-**Eu ajudo em cada etapa.**
+1. A loja entra em **Perfil** e clica em **Cadastrar localização da loja**.
+2. O cliente abre o carrinho, continua para o checkout e clica em **Usar minha localização**.
+3. O entregador permite o GPS ao abrir o painel.
+4. Após aceitar a corrida, usa **Rota 1** para a loja e **Rota 2** para o cliente.
+5. O administrador controla o valor do frete em **Entregas**.
 
 ---
 
@@ -66,13 +58,13 @@ Para instalar no celular:
 
 1. ✅ **Manter online no Render com PostgreSQL**
 2. ✅ **PWA instalável** (já incluso)
-3. 🔜 **Tráfego pago** (Google Ads, Facebook)
-4. 🔜 **Parceria com lojas** de material
-5. 🔜 **Google Play Store** (US$ 25)
-6. 🔜 **Sistema de avaliação**
+3. ✅ **GPS e frete dinâmico**
+4. 🔜 **Pix com confirmação automática**
+5. 🔜 **Parceria com lojas** de material
+6. 🔜 **Publicação em lojas de aplicativos**, usando contas elegíveis e seguindo as regras vigentes
 7. 🔜 **Notificação WhatsApp** dos pedidos
 
 ---
 
 ## 📞 SUPORTE
-Se travar, me chama que eu ajudo!
+Se algo travar, consulte também `DEPLOY_RENDER.md` e o relatório da atualização.

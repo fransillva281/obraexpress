@@ -1,9 +1,10 @@
-# ObraExpress — comissão inicial das lojas
+# ObraExpress — comissão promocional das lojas e entregadores
 
 ## Regra aprovada
 
-- Plano Loja: 10% sobre o valor dos produtos.
-- Plano Entrega ObraExpress: 10% sobre o valor dos produtos.
+- Loja: 5% sobre os produtos nos cinco primeiros meses após a primeira venda concluída; depois 7%.
+- Entregador: recebe 95% do frete nos cinco primeiros meses após a primeira entrega; depois recebe 93%.
+- A ObraExpress fica com 5% do frete na promoção e 7% depois.
 - Sem mensalidade nesta fase.
 - Sem taxa extra de pagamento enquanto não houver integração com uma empresa de pagamentos.
 - Frete separado da venda dos produtos.
@@ -22,7 +23,6 @@ O saldo mostrado neste momento é um cálculo interno para testes. Transferênci
 
 Venda de R$ 100,00 no Plano Entrega ObraExpress:
 
-- Comissão ObraExpress: R$ 10,00.
-- Líquido calculado da loja: R$ 90,00.
+- Comissão promocional ObraExpress: R$ 5,00.
+- Líquido calculado da loja: R$ 95,00.
 - Frete: calculado e controlado separadamente.
-

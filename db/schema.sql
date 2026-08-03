@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS lojas (
   tempo_entrega_min TEXT DEFAULT '30-60 min',
   aberto INTEGER DEFAULT 1,
   plano TEXT DEFAULT 'entrega_obraexpress',
-  comissao_percentual NUMERIC(5,2) DEFAULT 10.00,
+  comissao_percentual NUMERIC(5,2) DEFAULT 5.00,
+  inicio_promocao TIMESTAMPTZ,
   data_cadastro TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -72,6 +73,8 @@ CREATE TABLE IF NOT EXISTS entregadores (
   longitude DOUBLE PRECISION,
   avaliacao DOUBLE PRECISION DEFAULT 5.0,
   total_entregas INTEGER DEFAULT 0,
+  comissao_percentual NUMERIC(5,2) DEFAULT 5.00,
+  inicio_promocao TIMESTAMPTZ,
   data_cadastro TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -104,7 +107,11 @@ CREATE TABLE IF NOT EXISTS pedidos (
   valor_motoboy DOUBLE PRECISION DEFAULT 0,
   valor_plataforma DOUBLE PRECISION DEFAULT 0,
   plano_loja TEXT DEFAULT 'entrega_obraexpress',
-  comissao_loja_percentual NUMERIC(5,2) DEFAULT 10.00,
+  comissao_loja_percentual NUMERIC(5,2) DEFAULT 5.00,
+  comissao_entrega_percentual NUMERIC(5,2) DEFAULT 5.00,
+  taxa_base_entrega NUMERIC(12,2) DEFAULT 0,
+  adicional_clima_percentual NUMERIC(5,2) DEFAULT 0,
+  adicional_pico_percentual NUMERIC(5,2) DEFAULT 0,
   valor_comissao_loja NUMERIC(12,2) DEFAULT 0,
   valor_liquido_loja NUMERIC(12,2) DEFAULT 0,
   repasse_processado INTEGER DEFAULT 0,
@@ -170,6 +177,22 @@ CREATE TABLE IF NOT EXISTS categorias (
   ativa INTEGER DEFAULT 1
 );
 
+CREATE TABLE IF NOT EXISTS configuracoes_plataforma (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  frete_base NUMERIC(12,2) NOT NULL DEFAULT 5.00,
+  valor_km NUMERIC(12,2) NOT NULL DEFAULT 2.00,
+  fator_rota NUMERIC(5,2) NOT NULL DEFAULT 1.20,
+  adicional_chuva_percentual NUMERIC(5,2) NOT NULL DEFAULT 15.00,
+  adicional_pico_percentual NUMERIC(5,2) NOT NULL DEFAULT 10.00,
+  limite_adicionais_percentual NUMERIC(5,2) NOT NULL DEFAULT 25.00,
+  condicao_climatica TEXT NOT NULL DEFAULT 'normal',
+  entregas_ativas INTEGER NOT NULL DEFAULT 1,
+  atualizado_em TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO configuracoes_plataforma (id) VALUES (1)
+ON CONFLICT (id) DO NOTHING;
+
 ALTER TABLE categorias ADD COLUMN IF NOT EXISTS ativa INTEGER DEFAULT 1;
 
 ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS separado_por TEXT;
@@ -182,9 +205,16 @@ ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS pix_pago INTEGER DEFAULT 0;
 ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS data_separado TIMESTAMPTZ;
 ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS data_coleta TIMESTAMPTZ;
 ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS data_saida TIMESTAMPTZ;
-ALTER TABLE lojas ADD COLUMN IF NOT EXISTS comissao_percentual NUMERIC(5,2) DEFAULT 10.00;
+ALTER TABLE lojas ADD COLUMN IF NOT EXISTS comissao_percentual NUMERIC(5,2) DEFAULT 5.00;
+ALTER TABLE lojas ADD COLUMN IF NOT EXISTS inicio_promocao TIMESTAMPTZ;
+ALTER TABLE entregadores ADD COLUMN IF NOT EXISTS comissao_percentual NUMERIC(5,2) DEFAULT 5.00;
+ALTER TABLE entregadores ADD COLUMN IF NOT EXISTS inicio_promocao TIMESTAMPTZ;
 ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS plano_loja TEXT DEFAULT 'entrega_obraexpress';
-ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS comissao_loja_percentual NUMERIC(5,2) DEFAULT 10.00;
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS comissao_loja_percentual NUMERIC(5,2) DEFAULT 5.00;
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS comissao_entrega_percentual NUMERIC(5,2) DEFAULT 5.00;
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS taxa_base_entrega NUMERIC(12,2) DEFAULT 0;
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS adicional_clima_percentual NUMERIC(5,2) DEFAULT 0;
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS adicional_pico_percentual NUMERIC(5,2) DEFAULT 0;
 ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS valor_comissao_loja NUMERIC(12,2) DEFAULT 0;
 ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS valor_liquido_loja NUMERIC(12,2) DEFAULT 0;
 ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS repasse_processado INTEGER DEFAULT 0;
@@ -192,25 +222,36 @@ ALTER TABLE pedidos ALTER COLUMN status SET DEFAULT 'aguardando_confirmacao';
 
 ALTER TABLE lojas ALTER COLUMN plano SET DEFAULT 'entrega_obraexpress';
 UPDATE lojas SET plano = 'entrega_obraexpress' WHERE plano IS NULL OR plano NOT IN ('loja', 'entrega_obraexpress');
-UPDATE lojas SET comissao_percentual = 10.00 WHERE comissao_percentual IS NULL;
+ALTER TABLE lojas ALTER COLUMN comissao_percentual SET DEFAULT 5.00;
+ALTER TABLE entregadores ALTER COLUMN comissao_percentual SET DEFAULT 5.00;
+ALTER TABLE pedidos ALTER COLUMN comissao_loja_percentual SET DEFAULT 5.00;
+ALTER TABLE pedidos ALTER COLUMN comissao_entrega_percentual SET DEFAULT 5.00;
+UPDATE lojas SET comissao_percentual = CASE
+  WHEN inicio_promocao IS NULL OR inicio_promocao + INTERVAL '5 months' > CURRENT_TIMESTAMP THEN 5.00
+  ELSE 7.00 END;
+UPDATE entregadores SET comissao_percentual = CASE
+  WHEN inicio_promocao IS NULL OR inicio_promocao + INTERVAL '5 months' > CURRENT_TIMESTAMP THEN 5.00
+  ELSE 7.00 END;
 
--- Pedidos que ainda estão em andamento recebem a regra inicial de 10%.
+-- Pedidos ainda não concluídos recebem a regra promocional vigente.
 UPDATE pedidos
-SET plano_loja = 'entrega_obraexpress',
-    comissao_loja_percentual = 10.00,
-    valor_comissao_loja = ROUND((total_produtos::numeric * 0.10), 2),
-    valor_liquido_loja = ROUND((total_produtos::numeric * 0.90), 2)
+SET plano_loja = COALESCE((SELECT l.plano FROM lojas l WHERE l.id = pedidos.loja_id), 'entrega_obraexpress'),
+    comissao_loja_percentual = COALESCE((SELECT l.comissao_percentual FROM lojas l WHERE l.id = pedidos.loja_id), 5.00),
+    comissao_entrega_percentual = COALESCE((SELECT e.comissao_percentual FROM entregadores e WHERE e.id = pedidos.entregador_id), 5.00),
+    valor_comissao_loja = ROUND(total_produtos::numeric * COALESCE((SELECT l.comissao_percentual FROM lojas l WHERE l.id = pedidos.loja_id), 5.00) / 100, 2),
+    valor_liquido_loja = ROUND(
+      total_produtos::numeric * (100 - COALESCE((SELECT l.comissao_percentual FROM lojas l WHERE l.id = pedidos.loja_id), 5.00)) / 100
+      + CASE WHEN tipo_entrega = 'entrega' AND (SELECT l.plano FROM lojas l WHERE l.id = pedidos.loja_id) = 'loja'
+        THEN taxa_entrega::numeric ELSE 0 END, 2),
+    valor_motoboy = CASE WHEN tipo_entrega = 'entrega' AND COALESCE((SELECT l.plano FROM lojas l WHERE l.id = pedidos.loja_id), 'entrega_obraexpress') = 'entrega_obraexpress'
+      THEN ROUND(taxa_entrega::numeric * (100 - COALESCE((SELECT e.comissao_percentual FROM entregadores e WHERE e.id = pedidos.entregador_id), 5.00)) / 100, 2)
+      ELSE 0 END,
+    valor_plataforma = CASE WHEN tipo_entrega = 'entrega' AND COALESCE((SELECT l.plano FROM lojas l WHERE l.id = pedidos.loja_id), 'entrega_obraexpress') = 'entrega_obraexpress'
+      THEN ROUND(taxa_entrega::numeric * COALESCE((SELECT e.comissao_percentual FROM entregadores e WHERE e.id = pedidos.entregador_id), 5.00) / 100, 2)
+      ELSE 0 END
 WHERE status <> 'entregue' AND status <> 'cancelado'
   AND COALESCE(repasse_processado, 0) = 0
-  AND COALESCE(valor_comissao_loja, 0) = 0;
-
-UPDATE pedidos
-SET plano_loja = 'loja',
-    valor_liquido_loja = ROUND((total_produtos::numeric * 0.90) +
-      CASE WHEN tipo_entrega = 'entrega' THEN taxa_entrega::numeric ELSE 0 END, 2)
-WHERE loja_id IN (SELECT id FROM lojas WHERE plano = 'loja')
-  AND status <> 'entregue' AND status <> 'cancelado'
-  AND COALESCE(repasse_processado, 0) = 0;
+  AND (comissao_loja_percentual IS NULL OR comissao_loja_percentual >= 10.00);
 
 CREATE INDEX IF NOT EXISTS idx_produtos_loja ON produtos(loja_id);
 CREATE INDEX IF NOT EXISTS idx_pedidos_cliente_data ON pedidos(cliente_id, data_pedido DESC);

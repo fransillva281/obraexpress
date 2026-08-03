@@ -255,6 +255,8 @@ body{background:linear-gradient(180deg,#F7FAFB 0%,var(--bg) 45%);color:var(--tex
     <div id="endereco-group" class="form-group">
       <label>Endereço de entrega</label>
       <input type="text" id="endereco-entrega" placeholder="Rua, número, bairro">
+      <button type="button" class="btn btn-primary" onclick="capturarLocalizacaoEntrega()" style="margin-top:8px">📍 Usar minha localização para calcular o frete</button>
+      <div id="gps-entrega-status" style="font-size:12px;color:var(--texto-sec);margin-top:6px">O GPS é necessário para calcular o frete e guiar o entregador.</div>
     </div>
     <div class="form-group">
       <label>Observação</label>
@@ -263,10 +265,9 @@ body{background:linear-gradient(180deg,#F7FAFB 0%,var(--bg) 45%);color:var(--tex
     <div class="form-group">
       <label>Forma de pagamento</label>
       <select id="forma-pagamento">
-        <option value="pix">📱 Pix</option>
-        <option value="dinheiro">💵 Dinheiro</option>
-        <option value="cartao">💳 Cartão (na entrega)</option>
+        <option value="pix">📱 Pix — modo de teste</option>
       </select>
+      <div style="font-size:12px;color:var(--texto-sec);margin-top:6px">A cobrança real, o QR Code e a confirmação automática serão ativados na etapa Pix.</div>
     </div>
     <div id="checkout-resumo" class="cart-resumo"></div>
     <button class="btn btn-primary" onclick="finalizarPedido()" style="margin:16px 0">✅ Fazer Pedido</button>
@@ -357,6 +358,10 @@ body{background:linear-gradient(180deg,#F7FAFB 0%,var(--bg) 45%);color:var(--tex
         <input type="text" id="cad-endereco" placeholder="Rua, número, bairro">
       </div>
       <div class="form-group">
+        <button type="button" class="btn btn-primary" onclick="capturarLocalizacaoCadastroCliente()">📍 Marcar minha localização</button>
+        <div id="cad-gps-status" style="font-size:12px;color:var(--texto-sec);margin-top:6px">Você também poderá marcar o local no fechamento do pedido.</div>
+      </div>
+      <div class="form-group">
         <label>Senha</label>
         <input type="password" id="cad-senha" placeholder="Mínimo 6 caracteres">
       </div>
@@ -383,6 +388,9 @@ const API = '';
 let usuario = JSON.parse(localStorage.getItem('obraexpress_cliente'));
 let cart = JSON.parse(localStorage.getItem('cart') || '[]');
 let lojaAtual = null;
+let checkoutLocalizacao = null;
+let cotacaoFrete = null;
+let cadastroClienteLocalizacao = null;
 let categoriaAtiva = '';
 let categoriasCache = [];
 let searchTimer = null;
@@ -687,27 +695,80 @@ function mudarQty(idx, delta) {
 }
 
 // ============ CHECKOUT ============
-function irCheckout() {
+async function irCheckout() {
   if (!usuario) return toast('Faça login primeiro');
   if (cart.length === 0) return toast('Carrinho vazio');
-  const subtotal = cart.reduce((s,i) => s + i.preco * i.qty, 0);
-  const frete = 5;
-  document.getElementById('checkout-resumo').innerHTML = `
-    <div class="row"><span>Subtotal</span><span>R$ ${subtotal.toFixed(2)}</span></div>
-    <div class="row" id="frete-row"><span>🛵 Frete (estimado)</span><span>R$ ${frete.toFixed(2)}</span></div>
-    <div class="row total"><span>Total</span><span>R$ ${(subtotal+frete).toFixed(2)}</span></div>
-  `;
-  toggleTipoEntrega();
+  cotacaoFrete = null;
+  checkoutLocalizacao = null;
+  const dados = await api('/api/clientes/' + usuario.id);
+  if (dados.cliente) {
+    usuario = {...usuario, ...dados.cliente};
+    localStorage.setItem('obraexpress_cliente', JSON.stringify(usuario));
+    document.getElementById('endereco-entrega').value = usuario.endereco_padrao || '';
+    if (usuario.latitude !== null && usuario.latitude !== undefined && usuario.longitude !== null && usuario.longitude !== undefined && Number.isFinite(Number(usuario.latitude)) && Number.isFinite(Number(usuario.longitude))) {
+      checkoutLocalizacao = {latitude:Number(usuario.latitude), longitude:Number(usuario.longitude)};
+      document.getElementById('gps-entrega-status').innerHTML = '✅ Localização salva. Atualize pelo botão se a entrega for em outro lugar.';
+    }
+  }
   navigate('checkout');
+  await toggleTipoEntrega();
 }
 
-function toggleTipoEntrega() {
+function renderResumoCheckout() {
+  const tipo = document.getElementById('tipo-entrega').value;
+  const subtotal = cart.reduce((s,i) => s + i.preco * i.qty, 0);
+  const frete = tipo === 'entrega' && cotacaoFrete ? Number(cotacaoFrete.valor_frete) : 0;
+  const detalhe = tipo === 'entrega'
+    ? cotacaoFrete
+      ? `<div style="font-size:12px;color:var(--texto-sec);line-height:1.5;margin:6px 0">📏 ${Number(cotacaoFrete.distancia_km).toFixed(1)} km estimados${cotacaoFrete.adicional_clima_percentual ? ` • Chuva +${cotacaoFrete.adicional_clima_percentual}%` : ''}${cotacaoFrete.adicional_pico_percentual ? ` • Horário de pico +${cotacaoFrete.adicional_pico_percentual}%` : ''}</div>`
+      : `<div style="font-size:12px;color:var(--texto-sec);margin:6px 0">Marque o local no GPS para ver o frete.</div>`
+    : '';
+  document.getElementById('checkout-resumo').innerHTML = `
+    <div class="row"><span>Subtotal</span><span>R$ ${subtotal.toFixed(2)}</span></div>
+    <div class="row"><span>🛵 Frete</span><span>${tipo==='entrega' && !cotacaoFrete ? 'A calcular' : 'R$ '+frete.toFixed(2)}</span></div>
+    ${detalhe}
+    <div class="row total"><span>Total</span><span>R$ ${(subtotal+frete).toFixed(2)}</span></div>`;
+}
+
+async function calcularFreteCheckout() {
+  if (!checkoutLocalizacao || !cart.length) { cotacaoFrete = null; renderResumoCheckout(); return false; }
+  document.getElementById('gps-entrega-status').innerHTML = '⏳ Calculando distância e frete...';
+  const r = await api('/api/frete/cotacao', {method:'POST', body:JSON.stringify({
+    loja_id:cart[0].loja_id,
+    latitude:checkoutLocalizacao.latitude,
+    longitude:checkoutLocalizacao.longitude
+  })});
+  if (r.error) { cotacaoFrete = null; document.getElementById('gps-entrega-status').innerHTML = '⚠️ '+r.error; renderResumoCheckout(); return false; }
+  cotacaoFrete = r;
+  document.getElementById('gps-entrega-status').innerHTML = `✅ GPS confirmado • ${Number(r.distancia_km).toFixed(1)} km estimados • Frete R$ ${Number(r.valor_frete).toFixed(2)}`;
+  renderResumoCheckout();
+  return true;
+}
+
+function capturarLocalizacaoEntrega() {
+  if (!navigator.geolocation) return toast('Este aparelho não oferece localização GPS');
+  document.getElementById('gps-entrega-status').innerHTML = '📍 Buscando sua localização... permita o acesso ao GPS.';
+  navigator.geolocation.getCurrentPosition(async pos => {
+    checkoutLocalizacao = {latitude:pos.coords.latitude, longitude:pos.coords.longitude};
+    const endereco = document.getElementById('endereco-entrega').value;
+    await api('/api/clientes/'+usuario.id, {method:'PUT', body:JSON.stringify({
+      endereco_padrao:endereco,
+      latitude:checkoutLocalizacao.latitude,
+      longitude:checkoutLocalizacao.longitude
+    })});
+    await calcularFreteCheckout();
+  }, erro => {
+    const mensagens={1:'Permissão do GPS negada.',2:'Não foi possível encontrar sua localização.',3:'O GPS demorou para responder.'};
+    document.getElementById('gps-entrega-status').innerHTML = '⚠️ '+(mensagens[erro.code]||'Verifique o GPS do aparelho.');
+  }, {enableHighAccuracy:true, timeout:20000, maximumAge:10000});
+}
+
+async function toggleTipoEntrega() {
   const tipo = document.getElementById('tipo-entrega').value;
   document.getElementById('endereco-group').style.display = tipo === 'entrega' ? 'block' : 'none';
-  const frete = tipo === 'entrega' ? 5 : 0;
-  const subtotal = cart.reduce((s,i) => s + i.preco * i.qty, 0);
-  document.getElementById('frete-row').innerHTML = `<span>🛵 Frete</span><span>R$ ${frete.toFixed(2)}</span>`;
-  document.querySelector('#checkout-resumo .total span:last-child').textContent = `R$ ${(subtotal+frete).toFixed(2)}`;
+  if (tipo === 'retirada') { cotacaoFrete = null; renderResumoCheckout(); return; }
+  renderResumoCheckout();
+  if (checkoutLocalizacao) await calcularFreteCheckout();
 }
 
 async function finalizarPedido() {
@@ -717,19 +778,21 @@ async function finalizarPedido() {
   const obs = document.getElementById('observacao').value;
   const pagamento = document.getElementById('forma-pagamento').value;
   if (tipo === 'entrega' && !endereco) return toast('Informe o endereço de entrega');
+  if (tipo === 'entrega' && !checkoutLocalizacao) return toast('Use o botão de GPS para marcar o local da entrega');
+  if (tipo === 'entrega' && !cotacaoFrete && !(await calcularFreteCheckout())) return;
 
   const subtotal = cart.reduce((s,i) => s + i.preco * i.qty, 0);
-  const frete = tipo === 'entrega' ? 5 : 0;
 
   const r = await api('/api/pedidos', {
     method:'POST',
     body:JSON.stringify({
       loja_id: cart[0].loja_id,
       itens: cart.map(i => ({id:i.id, nome:i.nome, preco:i.preco, qty:i.qty})),
-      total_produtos: subtotal,
-      taxa_entrega: frete,
       tipo_entrega: tipo,
       endereco_entrega: endereco || 'Retirada na loja',
+      bairro_entrega: usuario.bairro || '',
+      latitude_entrega: tipo === 'entrega' ? checkoutLocalizacao.latitude : null,
+      longitude_entrega: tipo === 'entrega' ? checkoutLocalizacao.longitude : null,
       forma_pagamento: pagamento,
       observacao: obs
     })
@@ -770,7 +833,7 @@ function mostrarConfirmacao() {
       
       <div class="aviso">
         ⚠️ <strong>Você está vendo o valor total do seu pedido.</strong><br>
-        Ao confirmar, o pedido será enviado para a loja. Se cancelar, o pedido será descartado.
+        Ambiente de testes: ainda não existe cobrança Pix real. Ao confirmar, o pedido será enviado para a loja apenas para testar o fluxo.
       </div>
 
       <div class="btn-group">
@@ -1017,6 +1080,19 @@ async function loginCliente() {
   navigate('home');
 }
 
+function capturarLocalizacaoCadastroCliente() {
+  if (!navigator.geolocation) return toast('Este aparelho não oferece localização GPS');
+  const status = document.getElementById('cad-gps-status');
+  status.textContent = '📍 Buscando localização... permita o acesso ao GPS.';
+  navigator.geolocation.getCurrentPosition(pos => {
+    cadastroClienteLocalizacao = {latitude:pos.coords.latitude, longitude:pos.coords.longitude};
+    status.textContent = '✅ Localização marcada com sucesso.';
+  }, erro => {
+    const mensagens={1:'Permissão do GPS negada.',2:'Não foi possível encontrar a localização.',3:'O GPS demorou para responder.'};
+    status.textContent = '⚠️ '+(mensagens[erro.code]||'Verifique o GPS do aparelho.');
+  }, {enableHighAccuracy:true, timeout:20000, maximumAge:10000});
+}
+
 async function cadastroCliente() {
   const nome = document.getElementById('cad-nome').value;
   const email = document.getElementById('cad-email').value;
@@ -1026,7 +1102,11 @@ async function cadastroCliente() {
   if (!nome || !email || !senha) return toast('Preencha nome, email e senha');
   const r = await api('/api/clientes/cadastro', {
     method:'POST',
-    body:JSON.stringify({nome, email, senha, telefone, endereco_padrao: endereco})
+    body:JSON.stringify({
+      nome, email, senha, telefone, endereco_padrao: endereco,
+      latitude:cadastroClienteLocalizacao?.latitude,
+      longitude:cadastroClienteLocalizacao?.longitude
+    })
   });
   if (r.error) return toast(r.error);
   usuario = r.cliente;

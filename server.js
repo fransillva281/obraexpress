@@ -14,6 +14,7 @@ const {
 } = require('./database');
 const {
   arredondarDinheiro,
+  calcularPercentualPromocional,
   calcularFinanceiroPedido,
   normalizarPlanoLoja
 } = require('./financial-utils');
@@ -31,15 +32,77 @@ const JWT_SECRET = requireEnvironment('JWT_SECRET');
 const ADMIN_EMAIL = requireEnvironment('ADMIN_EMAIL');
 const ADMIN_PASSWORD = requireEnvironment('ADMIN_PASSWORD');
 
-// Configurações da plataforma
-const PLATAFORMA = {
-  nome: 'ObraExpress',
-  perc_motoboy: 0.85,    // 85% da taxa de entrega pro motoboy
-  perc_plataforma: 0.15, // 15% temporário da taxa de entrega para a plataforma
-  mensalidade_loja: 0,   // Sem mensalidade na fase inicial
-  comissao_pedido: 0.10  // 10% sobre os produtos nos dois planos
-};
-const TAXA_ENTREGA_TEMPORARIA = 5;
+const FUSO_PLATAFORMA = 'America/Araguaina';
+
+function coordenadaValida(latitude, longitude) {
+  if (latitude === null || latitude === undefined || latitude === '' || longitude === null || longitude === undefined || longitude === '') return false;
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  return Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+}
+
+function calcularDistanciaRetaKm(origemLat, origemLng, destinoLat, destinoLng) {
+  const raioTerra = 6371;
+  const rad = valor => Number(valor) * Math.PI / 180;
+  const dLat = rad(Number(destinoLat) - Number(origemLat));
+  const dLng = rad(Number(destinoLng) - Number(origemLng));
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(origemLat)) * Math.cos(rad(destinoLat)) * Math.sin(dLng / 2) ** 2;
+  return raioTerra * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function horarioDePico(agora = new Date()) {
+  const partes = new Intl.DateTimeFormat('pt-BR', {
+    timeZone: FUSO_PLATAFORMA,
+    hour: '2-digit',
+    hour12: false
+  }).formatToParts(agora);
+  const hora = Number(partes.find(parte => parte.type === 'hour')?.value || 0);
+  return (hora >= 11 && hora < 14) || (hora >= 17 && hora < 20);
+}
+
+async function obterConfiguracaoFrete() {
+  return (await dbGet('SELECT * FROM configuracoes_plataforma WHERE id = 1')) || {
+    frete_base: 5,
+    valor_km: 2,
+    fator_rota: 1.2,
+    adicional_chuva_percentual: 15,
+    adicional_pico_percentual: 10,
+    limite_adicionais_percentual: 25,
+    condicao_climatica: 'normal',
+    entregas_ativas: 1
+  };
+}
+
+async function calcularCotacaoFrete(loja, latitudeEntrega, longitudeEntrega, agora = new Date()) {
+  if (!coordenadaValida(loja.latitude, loja.longitude)) {
+    throw Object.assign(new Error('A loja ainda precisa cadastrar a localização GPS'), { status: 400 });
+  }
+  if (!coordenadaValida(latitudeEntrega, longitudeEntrega)) {
+    throw Object.assign(new Error('Use o botão de GPS para marcar o local da entrega'), { status: 400 });
+  }
+  const config = await obterConfiguracaoFrete();
+  if (!Number(config.entregas_ativas) || config.condicao_climatica === 'perigoso') {
+    throw Object.assign(new Error('Entregas temporariamente pausadas por segurança'), { status: 409 });
+  }
+  const distanciaReta = calcularDistanciaRetaKm(loja.latitude, loja.longitude, latitudeEntrega, longitudeEntrega);
+  const distanciaEstimada = Math.max(0.5, distanciaReta * Number(config.fator_rota || 1.2));
+  const taxaBase = arredondarDinheiro(Number(config.frete_base || 0) + distanciaEstimada * Number(config.valor_km || 0));
+  const adicionalClima = config.condicao_climatica === 'chuva' ? Number(config.adicional_chuva_percentual || 0) : 0;
+  const pico = horarioDePico(agora);
+  const adicionalPico = pico ? Number(config.adicional_pico_percentual || 0) : 0;
+  const adicionaisAplicados = Math.min(adicionalClima + adicionalPico, Number(config.limite_adicionais_percentual || 0));
+  return {
+    distancia_km: Math.round(distanciaEstimada * 10) / 10,
+    distancia_reta_km: Math.round(distanciaReta * 10) / 10,
+    taxa_base: taxaBase,
+    adicional_clima_percentual: adicionalClima,
+    adicional_pico_percentual: adicionalPico,
+    adicional_total_percentual: adicionaisAplicados,
+    horario_pico: pico,
+    condicao_climatica: config.condicao_climatica,
+    valor_frete: arredondarDinheiro(taxaBase * (1 + adicionaisAplicados / 100))
+  };
+}
 
 // Middleware
 app.use(cors());
@@ -122,10 +185,11 @@ app.post('/api/lojas/cadastro', async (req, res) => {
     const planoEscolhido = normalizarPlanoLoja(plano);
     const hash = bcrypt.hashSync(senha, 10);
     const taxaKm = Number(taxa_entrega_km || 2);
+    if (!coordenadaValida(latitude, longitude)) return res.status(400).json({ error: 'Use o botão de GPS para marcar a localização da loja' });
     const result = await dbRun('INSERT INTO lojas (nome, email, senha, telefone, endereco, bairro, latitude, longitude, descricao, categorias, taxa_entrega_km, chave_pix, plano, comissao_percentual, tempo_entrega_min) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', 
-      [nome, email, hash, telefone, endereco, bairro, latitude, longitude, descricao, categorias, taxaKm, chave_pix || null, planoEscolhido, 10, tempo_entrega_min || '30-60 min']);
+      [nome, email, hash, telefone, endereco, bairro, Number(latitude), Number(longitude), descricao, categorias, taxaKm, chave_pix || null, planoEscolhido, 5, tempo_entrega_min || '30-60 min']);
     const token = jwt.sign({ id: result.lastID, tipo: 'loja' }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ success: true, id: result.lastID, token, loja: { id: result.lastID, nome, email, plano: planoEscolhido, comissao_percentual: 10, taxa_entrega_km: taxaKm, chave_pix: chave_pix || null } });
+    res.json({ success: true, id: result.lastID, token, loja: { id: result.lastID, nome, email, plano: planoEscolhido, comissao_percentual: 5, taxa_entrega_km: taxaKm, chave_pix: chave_pix || null, latitude: Number(latitude), longitude: Number(longitude), inicio_promocao: null } });
   } catch (e) {
     if (isUniqueViolation(e)) return res.status(400).json({ error: 'Email já cadastrado' });
     console.error('Erro ao cadastrar loja:', e);
@@ -138,8 +202,10 @@ app.post('/api/lojas/login', async (req, res) => {
   const loja = await dbGet('SELECT * FROM lojas WHERE email = ?', [email]);
   if (!loja) return res.status(401).json({ error: 'Email não encontrado' });
   if (!bcrypt.compareSync(senha, loja.senha)) return res.status(401).json({ error: 'Senha incorreta' });
+  loja.comissao_percentual = calcularPercentualPromocional(loja.inicio_promocao);
+  await dbRun('UPDATE lojas SET comissao_percentual = ? WHERE id = ?', [loja.comissao_percentual, loja.id]);
   const token = jwt.sign({ id: loja.id, tipo: 'loja' }, JWT_SECRET, { expiresIn: '7d' });
-  res.json({ success: true, token, loja: { id: loja.id, nome: loja.nome, email: loja.email, logo: loja.logo, aberto: loja.aberto, taxa_entrega_km: loja.taxa_entrega_km, chave_pix: loja.chave_pix, plano: normalizarPlanoLoja(loja.plano), comissao_percentual: Number(loja.comissao_percentual || 10) } });
+  res.json({ success: true, token, loja: { id: loja.id, nome: loja.nome, email: loja.email, logo: loja.logo, aberto: loja.aberto, taxa_entrega_km: loja.taxa_entrega_km, chave_pix: loja.chave_pix, plano: normalizarPlanoLoja(loja.plano), comissao_percentual: Number(loja.comissao_percentual), inicio_promocao: loja.inicio_promocao, latitude: loja.latitude, longitude: loja.longitude } });
 });
 
 app.get('/api/lojas', async (req, res) => {
@@ -158,8 +224,9 @@ app.get('/api/lojas', async (req, res) => {
 });
 
 app.get('/api/lojas/:id', async (req, res) => {
-  const loja = await dbGet('SELECT id, nome, logo, descricao, categorias, endereco, bairro, cidade, estado, telefone, whatsapp, chave_pix, taxa_entrega_km, entrega_gratis_ate, tempo_entrega_min, aberto, latitude, longitude, plano, comissao_percentual FROM lojas WHERE id = ?', [req.params.id]);
+  const loja = await dbGet('SELECT id, nome, logo, descricao, categorias, endereco, bairro, cidade, estado, telefone, whatsapp, chave_pix, taxa_entrega_km, entrega_gratis_ate, tempo_entrega_min, aberto, latitude, longitude, plano, comissao_percentual, inicio_promocao FROM lojas WHERE id = ?', [req.params.id]);
   if (!loja) return res.status(404).json({ error: 'Loja não encontrada' });
+  loja.comissao_percentual = calcularPercentualPromocional(loja.inicio_promocao);
   const produtos = await dbAll(`SELECT p.*,
     CASE WHEN EXISTS (
       SELECT 1 FROM categorias c
@@ -282,7 +349,7 @@ app.post('/api/clientes/cadastro', async (req, res) => {
     const hash = bcrypt.hashSync(senha, 10);
     const result = await dbRun('INSERT INTO clientes (nome, email, senha, telefone, endereco_padrao, bairro, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [nome, email, hash, telefone, endereco_padrao, bairro, latitude, longitude]);
     const token = jwt.sign({ id: result.lastID, tipo: 'cliente' }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ success: true, token, cliente: { id: result.lastID, nome, email } });
+    res.json({ success: true, token, cliente: { id: result.lastID, nome, email, telefone, endereco_padrao, bairro, latitude: latitude || null, longitude: longitude || null } });
   } catch (e) {
     if (isUniqueViolation(e)) return res.status(400).json({ error: 'Email já cadastrado' });
     console.error('Erro ao cadastrar cliente:', e);
@@ -296,7 +363,7 @@ app.post('/api/clientes/login', async (req, res) => {
   if (!cliente) return res.status(401).json({ error: 'Email não encontrado' });
   if (!bcrypt.compareSync(senha, cliente.senha)) return res.status(401).json({ error: 'Senha incorreta' });
   const token = jwt.sign({ id: cliente.id, tipo: 'cliente' }, JWT_SECRET, { expiresIn: '7d' });
-  res.json({ success: true, token, cliente: { id: cliente.id, nome: cliente.nome, email: cliente.email, telefone: cliente.telefone, endereco_padrao: cliente.endereco_padrao, bairro: cliente.bairro } });
+  res.json({ success: true, token, cliente: { id: cliente.id, nome: cliente.nome, email: cliente.email, telefone: cliente.telefone, endereco_padrao: cliente.endereco_padrao, bairro: cliente.bairro, latitude: cliente.latitude, longitude: cliente.longitude } });
 });
 
 app.get('/api/clientes/:id', authCliente, async (req, res) => {
@@ -331,7 +398,7 @@ app.post('/api/entregadores/cadastro', async (req, res) => {
     const token = jwt.sign({ id: result.lastID, tipo: 'entregador' }, JWT_SECRET, { expiresIn: '7d' });
     // Criar saldo inicial
     await dbRun('INSERT INTO saldo_entregadores (entregador_id, saldo) VALUES (?, 0) ON CONFLICT (entregador_id) DO NOTHING', [result.lastID]);
-    res.json({ success: true, token, entregador: { id: result.lastID, nome, email } });
+    res.json({ success: true, token, entregador: { id: result.lastID, nome, email, comissao_percentual: 5, inicio_promocao: null } });
   } catch (e) {
     if (isUniqueViolation(e)) return res.status(400).json({ error: 'CPF ou email já cadastrado' });
     console.error('Erro ao cadastrar entregador:', e);
@@ -345,7 +412,9 @@ app.post('/api/entregadores/login', async (req, res) => {
   if (!entregador) return res.status(401).json({ error: 'Email não encontrado' });
   if (!bcrypt.compareSync(senha, entregador.senha)) return res.status(401).json({ error: 'Senha incorreta' });
   const token = jwt.sign({ id: entregador.id, tipo: 'entregador' }, JWT_SECRET, { expiresIn: '7d' });
-  res.json({ success: true, token, entregador: { id: entregador.id, nome: entregador.nome, email: entregador.email, veiculo: entregador.veiculo, disponivel: entregador.disponivel, chave_pix: entregador.chave_pix } });
+  const comissaoPercentual = calcularPercentualPromocional(entregador.inicio_promocao);
+  await dbRun('UPDATE entregadores SET comissao_percentual = ? WHERE id = ?', [comissaoPercentual, entregador.id]);
+  res.json({ success: true, token, entregador: { id: entregador.id, nome: entregador.nome, email: entregador.email, veiculo: entregador.veiculo, disponivel: entregador.disponivel, chave_pix: entregador.chave_pix, comissao_percentual: comissaoPercentual, inicio_promocao: entregador.inicio_promocao } });
 });
 
 app.get('/api/entregadores/disponiveis', async (req, res) => {
@@ -427,23 +496,41 @@ async function montarItensPedido(lojaId, itens) {
   return { itens: itensConfirmados, totalProdutos: arredondarDinheiro(total) };
 }
 
+app.post('/api/frete/cotacao', authCliente, async (req, res) => {
+  try {
+    const { loja_id, latitude, longitude } = req.body;
+    const loja = await dbGet('SELECT id, latitude, longitude FROM lojas WHERE id = ? AND aberto = 1', [loja_id]);
+    if (!loja) return res.status(404).json({ error: 'Loja não encontrada ou fechada' });
+    const cotacao = await calcularCotacaoFrete(loja, latitude, longitude);
+    res.json({ success: true, ...cotacao });
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    console.error('Erro ao calcular frete:', error);
+    res.status(500).json({ error: 'Não foi possível calcular o frete' });
+  }
+});
+
 // Cliente faz pedido. Preços e comissão são sempre recalculados no servidor.
 app.post('/api/pedidos', authCliente, async (req, res) => {
   try {
-    const { loja_id, itens, tipo_entrega, endereco_entrega, bairro_entrega, latitude_entrega, longitude_entrega, distancia_km, forma_pagamento, observacao } = req.body;
+    const { loja_id, itens, tipo_entrega, endereco_entrega, bairro_entrega, latitude_entrega, longitude_entrega, forma_pagamento, observacao } = req.body;
     if (!['entrega', 'retirada'].includes(tipo_entrega)) return res.status(400).json({ error: 'Tipo de entrega inválido' });
     if (tipo_entrega === 'entrega' && !endereco_entrega) return res.status(400).json({ error: 'Informe o endereço de entrega' });
-    const loja = await dbGet('SELECT id, plano, comissao_percentual FROM lojas WHERE id = ? AND aberto = 1', [loja_id]);
+    const loja = await dbGet('SELECT id, plano, comissao_percentual, inicio_promocao, latitude, longitude FROM lojas WHERE id = ? AND aberto = 1', [loja_id]);
     if (!loja) return res.status(404).json({ error: 'Loja não encontrada ou fechada' });
     const carrinho = await montarItensPedido(loja_id, itens);
-    const taxaEntrega = tipo_entrega === 'entrega' ? TAXA_ENTREGA_TEMPORARIA : 0;
+    const cotacao = tipo_entrega === 'entrega'
+      ? await calcularCotacaoFrete(loja, latitude_entrega, longitude_entrega)
+      : { valor_frete: 0, distancia_km: 0, taxa_base: 0, adicional_clima_percentual: 0, adicional_pico_percentual: 0 };
+    const comissaoLoja = calcularPercentualPromocional(loja.inicio_promocao);
+    const comissaoEntrega = normalizarPlanoLoja(loja.plano) === 'entrega_obraexpress' && tipo_entrega === 'entrega' ? 5 : 0;
     const financeiro = calcularFinanceiroPedido({
       totalProdutos: carrinho.totalProdutos,
-      taxaEntrega,
+      taxaEntrega: cotacao.valor_frete,
       tipoEntrega: tipo_entrega,
       planoLoja: loja.plano,
-      comissaoPercentual: 10,
-      percentualEntregador: PLATAFORMA.perc_motoboy * 100
+      comissaoPercentual: comissaoLoja,
+      percentualEntregador: 100 - comissaoEntrega
     });
     const codigo = Math.random().toString(36).substring(2, 8).toUpperCase();
 
@@ -451,14 +538,18 @@ app.post('/api/pedidos', authCliente, async (req, res) => {
       (cliente_id, loja_id, itens, total_produtos, taxa_entrega, total_final, tipo_entrega,
        endereco_entrega, bairro_entrega, latitude_entrega, longitude_entrega, distancia_km,
        forma_pagamento, observacao, codigo_retirada, status, valor_motoboy, valor_plataforma,
-       plano_loja, comissao_loja_percentual, valor_comissao_loja, valor_liquido_loja)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       plano_loja, comissao_loja_percentual, comissao_entrega_percentual,
+       taxa_base_entrega, adicional_clima_percentual, adicional_pico_percentual,
+       valor_comissao_loja, valor_liquido_loja)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [req.usuario.id, loja_id, JSON.stringify(carrinho.itens), carrinho.totalProdutos,
        financeiro.taxaEntrega, financeiro.totalFinal, tipo_entrega, endereco_entrega,
-       bairro_entrega, latitude_entrega, longitude_entrega, distancia_km || 0,
+       bairro_entrega, latitude_entrega || null, longitude_entrega || null, cotacao.distancia_km,
        forma_pagamento || 'pix', observacao, tipo_entrega === 'retirada' ? codigo : null, 'aguardando_confirmacao',
        financeiro.valorMotoboy, financeiro.valorPlataformaEntrega, financeiro.planoLoja,
-       financeiro.comissaoPercentual, financeiro.valorComissaoLoja, financeiro.valorLiquidoLoja]);
+       financeiro.comissaoPercentual, comissaoEntrega, cotacao.taxa_base,
+       cotacao.adicional_clima_percentual, cotacao.adicional_pico_percentual,
+       financeiro.valorComissaoLoja, financeiro.valorLiquidoLoja]);
 
     res.json({
       success: true,
@@ -466,9 +557,13 @@ app.post('/api/pedidos', authCliente, async (req, res) => {
       codigo_retirada: tipo_entrega === 'retirada' ? codigo : null,
       total_produtos: carrinho.totalProdutos,
       taxa_entrega: financeiro.taxaEntrega,
-      total_final: financeiro.totalFinal
+      total_final: financeiro.totalFinal,
+      distancia_km: cotacao.distancia_km,
+      adicional_clima_percentual: cotacao.adicional_clima_percentual,
+      adicional_pico_percentual: cotacao.adicional_pico_percentual
     });
   } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
     const mensagensPermitidas = ['Carrinho vazio', 'Item ou quantidade inválida', 'Um produto não está mais disponível', 'Todos os produtos precisam ser da mesma loja'];
     if (mensagensPermitidas.includes(error.message) || error.message.startsWith('Estoque insuficiente')) {
       return res.status(400).json({ error: error.message });
@@ -553,8 +648,9 @@ app.get('/api/pedidos/entregador/:entregador_id', authEntregador, async (req, re
   if (req.usuario.id != req.params.entregador_id) return res.status(403).json({ error: 'Permissão negada' });
   const pedidos = await dbAll(`SELECT p.*, l.nome as loja_nome, l.endereco as loja_endereco, 
     l.latitude as loja_latitude, l.longitude as loja_longitude, l.telefone as loja_telefone,
-    c.nome as cliente_nome, c.telefone as cliente_telefone, c.endereco_padrao as cliente_endereco,
-    c.latitude as cliente_latitude, c.longitude as cliente_longitude
+    c.nome as cliente_nome, c.telefone as cliente_telefone, COALESCE(p.endereco_entrega, c.endereco_padrao) as cliente_endereco,
+    COALESCE(p.latitude_entrega, c.latitude) as cliente_latitude,
+    COALESCE(p.longitude_entrega, c.longitude) as cliente_longitude
     FROM pedidos p 
     JOIN lojas l ON p.loja_id = l.id 
     JOIN clientes c ON p.cliente_id = c.id 
@@ -563,29 +659,41 @@ app.get('/api/pedidos/entregador/:entregador_id', authEntregador, async (req, re
 });
 
 // ENTREGADOR: Ver pedidos disponíveis (status = separado, precisa de entrega)
-app.get('/api/pedidos/disponiveis', async (req, res) => {
+app.get('/api/pedidos/disponiveis', authEntregador, async (req, res) => {
+  const entregador = await dbGet('SELECT inicio_promocao FROM entregadores WHERE id = ?', [req.usuario.id]);
+  const comissaoEntrega = calcularPercentualPromocional(entregador?.inicio_promocao);
   const pedidos = await dbAll(`SELECT p.*, l.nome as loja_nome, l.endereco as loja_endereco, 
     l.latitude as loja_latitude, l.longitude as loja_longitude, l.telefone as loja_telefone, l.chave_pix,
-    c.nome as cliente_nome, c.telefone as cliente_telefone, c.endereco_padrao as cliente_endereco,
-    c.latitude as cliente_latitude, c.longitude as cliente_longitude
+    c.nome as cliente_nome, c.telefone as cliente_telefone, COALESCE(p.endereco_entrega, c.endereco_padrao) as cliente_endereco,
+    COALESCE(p.latitude_entrega, c.latitude) as cliente_latitude,
+    COALESCE(p.longitude_entrega, c.longitude) as cliente_longitude
     FROM pedidos p 
     JOIN lojas l ON p.loja_id = l.id 
     JOIN clientes c ON p.cliente_id = c.id 
     WHERE p.status = 'separado' AND p.tipo_entrega = 'entrega'
       AND p.plano_loja = 'entrega_obraexpress' AND p.entregador_id IS NULL 
     ORDER BY p.data_pedido ASC`);
-  res.json({ pedidos });
+  res.json({ pedidos: pedidos.map(pedido => ({
+    ...pedido,
+    comissao_entrega_percentual: comissaoEntrega,
+    valor_motoboy: arredondarDinheiro(Number(pedido.taxa_entrega || 0) * (100 - comissaoEntrega) / 100)
+  })) });
 });
 
 // ENTREGADOR: Aceitar pedido
 app.put('/api/pedidos/:id/aceitar', authEntregador, async (req, res) => {
-  const atualizacao = await dbRun(`UPDATE pedidos SET entregador_id = ?, status = ?
+  const entregador = await dbGet('SELECT inicio_promocao FROM entregadores WHERE id = ?', [req.usuario.id]);
+  const comissaoEntrega = calcularPercentualPromocional(entregador?.inicio_promocao);
+  const atualizacao = await dbRun(`UPDATE pedidos SET entregador_id = ?, status = ?,
+    comissao_entrega_percentual = ?,
+    valor_motoboy = ROUND((taxa_entrega::numeric * ? / 100), 2),
+    valor_plataforma = ROUND((taxa_entrega::numeric * ? / 100), 2)
     WHERE id = ? AND status = 'separado' AND entregador_id IS NULL AND plano_loja = 'entrega_obraexpress'`,
-    [req.usuario.id, 'em_coleta', req.params.id]);
+    [req.usuario.id, 'em_coleta', comissaoEntrega, 100 - comissaoEntrega, comissaoEntrega, req.params.id]);
   if (!atualizacao.changes) return res.status(409).json({ error: 'Essa entrega não está mais disponível' });
   await dbRun('UPDATE entregadores SET disponivel = 0 WHERE id = ?', [req.usuario.id]);
   
-  res.json({ success: true, message: 'Pedido aceito! Vá até a loja para buscar.' });
+  res.json({ success: true, message: 'Pedido aceito! Vá até a loja para buscar.', comissao_percentual: comissaoEntrega });
 });
 
 // ENTREGADOR: Recusar pedido (volta pra lista)
@@ -632,7 +740,7 @@ async function registrarRepasseFinanceiro(tx, pedido, entregadorId = null) {
 
   if (comissaoLoja > 0) {
     await tx.run('INSERT INTO saldo_plataforma (descricao, valor, tipo, pedido_id) VALUES (?, ?, ?, ?)',
-      [`Comissão de 10% da loja — pedido #${pedido.id}`, comissaoLoja, 'credito', pedido.id]);
+      [`Comissão de ${Number(pedido.comissao_loja_percentual || 5)}% da loja — pedido #${pedido.id}`, comissaoLoja, 'credito', pedido.id]);
   }
   if (valorPlataformaEntrega > 0) {
     await tx.run('INSERT INTO saldo_plataforma (descricao, valor, tipo, pedido_id) VALUES (?, ?, ?, ?)',
@@ -644,7 +752,12 @@ async function registrarRepasseFinanceiro(tx, pedido, entregadorId = null) {
     await tx.run(`UPDATE saldo_entregadores SET saldo = saldo + ?, total_ganho = total_ganho + ?
       WHERE entregador_id = ?`, [valorMotoboy, valorMotoboy, entregadorId]);
     await tx.run('UPDATE entregadores SET total_entregas = total_entregas + 1, disponivel = 1 WHERE id = ?', [entregadorId]);
+    await tx.run(`UPDATE entregadores SET inicio_promocao = COALESCE(inicio_promocao, CURRENT_TIMESTAMP),
+      comissao_percentual = ? WHERE id = ?`, [Number(pedido.comissao_entrega_percentual || 5), entregadorId]);
   }
+
+  await tx.run(`UPDATE lojas SET inicio_promocao = COALESCE(inicio_promocao, CURRENT_TIMESTAMP),
+    comissao_percentual = ? WHERE id = ?`, [Number(pedido.comissao_loja_percentual || 5), pedido.loja_id]);
 
   await tx.run('UPDATE pedidos SET repasse_processado = 1 WHERE id = ?', [pedido.id]);
   return true;
@@ -766,21 +879,17 @@ app.get('/api/categorias', async (req, res) => {
 });
 
 // ============ DISTÂNCIA ============
-app.get('/api/distancia', (req, res) => {
+app.get('/api/distancia', async (req, res) => {
   const { origem_lat, origem_lng, dest_lat, dest_lng } = req.query;
-  if (!origem_lat || !origem_lng || !dest_lat || !dest_lng) {
+  if (!coordenadaValida(origem_lat, origem_lng) || !coordenadaValida(dest_lat, dest_lng)) {
     return res.status(400).json({ error: 'Coordenadas necessárias' });
   }
-  const R = 6371;
-  const dLat = (parseFloat(dest_lat) - parseFloat(origem_lat)) * Math.PI / 180;
-  const dLon = (parseFloat(dest_lng) - parseFloat(origem_lng)) * Math.PI / 180;
-  const a = Math.sin(dLat/2) * Math.sin(dLat/2) + 
-    Math.cos(parseFloat(origem_lat) * Math.PI / 180) * Math.cos(parseFloat(dest_lat) * Math.PI / 180) * 
-    Math.sin(dLon/2) * Math.sin(dLon/2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  const distancia = R * c;
-  const valor_frete = Math.round(distancia * 2 * 10) / 10; // R$ 2/km
-  res.json({ distancia_km: Math.round(distancia * 10) / 10, valor_frete });
+  try {
+    const cotacao = await calcularCotacaoFrete({ latitude: origem_lat, longitude: origem_lng }, dest_lat, dest_lng);
+    res.json(cotacao);
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || 'Não foi possível calcular a distância' });
+  }
 });
 
 // ============ ADMIN API ============
@@ -791,6 +900,42 @@ app.post('/api/admin/login', async (req, res) => {
     return res.json({ success: true, token });
   }
   res.status(401).json({ error: 'Credenciais de admin inválidas' });
+});
+
+app.get('/api/admin/configuracoes-entrega', authAdmin, async (req, res) => {
+  res.json({ configuracao: await obterConfiguracaoFrete(), horario_pico: horarioDePico() });
+});
+
+app.put('/api/admin/configuracoes-entrega', authAdmin, async (req, res) => {
+  const limites = {
+    frete_base: [0, 100],
+    valor_km: [0, 100],
+    fator_rota: [1, 3],
+    adicional_chuva_percentual: [0, 100],
+    adicional_pico_percentual: [0, 100],
+    limite_adicionais_percentual: [0, 100]
+  };
+  const updates = [];
+  const params = [];
+  for (const [campo, [minimo, maximo]] of Object.entries(limites)) {
+    if (req.body[campo] !== undefined) {
+      const valor = Number(req.body[campo]);
+      if (!Number.isFinite(valor) || valor < minimo || valor > maximo) return res.status(400).json({ error: `Valor inválido em ${campo}` });
+      updates.push(`${campo} = ?`); params.push(valor);
+    }
+  }
+  if (req.body.condicao_climatica !== undefined) {
+    if (!['normal', 'chuva', 'perigoso'].includes(req.body.condicao_climatica)) return res.status(400).json({ error: 'Condição climática inválida' });
+    updates.push('condicao_climatica = ?'); params.push(req.body.condicao_climatica);
+  }
+  if (req.body.entregas_ativas !== undefined) {
+    updates.push('entregas_ativas = ?'); params.push(req.body.entregas_ativas ? 1 : 0);
+  }
+  if (!updates.length) return res.status(400).json({ error: 'Nada para atualizar' });
+  updates.push('atualizado_em = CURRENT_TIMESTAMP');
+  params.push(1);
+  await dbRun(`UPDATE configuracoes_plataforma SET ${updates.join(', ')} WHERE id = ?`, params);
+  res.json({ success: true, configuracao: await obterConfiguracaoFrete() });
 });
 
 // Excluir a própria conta e seus dados relacionados
@@ -883,7 +1028,8 @@ app.get('/api/admin/pedidos', authAdmin, async (req, res) => {
 
 app.get('/api/admin/financeiro', authAdmin, async (req, res) => {
   const saldoPlataforma = await dbAll('SELECT * FROM saldo_plataforma ORDER BY data DESC LIMIT 50');
-  const saldoEntregadores = await dbAll(`SELECT se.*, e.nome as entregador_nome, e.email, e.chave_pix 
+  const saldoEntregadores = await dbAll(`SELECT se.*, e.nome as entregador_nome, e.email, e.chave_pix,
+    e.inicio_promocao, e.comissao_percentual
     FROM saldo_entregadores se 
     JOIN entregadores e ON se.entregador_id = e.id 
     ORDER BY se.saldo DESC`);
@@ -891,13 +1037,24 @@ app.get('/api/admin/financeiro', authAdmin, async (req, res) => {
     sl.saldo::double precision AS saldo,
     sl.total_recebido::double precision AS total_recebido,
     sl.total_sacado::double precision AS total_sacado,
-    l.nome as loja_nome, l.email, l.chave_pix, l.plano,
+    l.nome as loja_nome, l.email, l.chave_pix, l.plano, l.inicio_promocao,
     l.comissao_percentual::double precision AS comissao_percentual
     FROM saldo_lojas sl
     JOIN lojas l ON sl.loja_id = l.id
     ORDER BY sl.saldo DESC`);
   const totalPlataforma = await dbGet('SELECT COALESCE(SUM(valor), 0) as total FROM saldo_plataforma WHERE tipo = ?', ['credito']);
-  res.json({ saldoPlataforma, saldoEntregadores, saldoLojas, totalPlataforma: totalPlataforma?.total || 0 });
+  res.json({
+    saldoPlataforma,
+    saldoEntregadores: saldoEntregadores.map(item => ({
+      ...item,
+      comissao_percentual: calcularPercentualPromocional(item.inicio_promocao)
+    })),
+    saldoLojas: saldoLojas.map(item => ({
+      ...item,
+      comissao_percentual: calcularPercentualPromocional(item.inicio_promocao)
+    })),
+    totalPlataforma: totalPlataforma?.total || 0
+  });
 });
 
 // ============ SERVE FRONTEND ============

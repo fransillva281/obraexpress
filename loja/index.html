@@ -65,10 +65,10 @@ body{background:var(--bg);color:var(--texto)}
       <div class="form-group"><label>Telefone / WhatsApp</label><input type="text" id="cad-telefone" placeholder="(98) 99999-9999"></div>
       <div class="form-group"><label>Endereço</label><input type="text" id="cad-endereco" placeholder="Rua, número"></div>
       <div class="form-group"><label>Bairro</label><input type="text" id="cad-bairro" placeholder="Centro"></div>
+      <div class="form-group"><button type="button" class="btn btn-primary" onclick="capturarLocalizacaoCadastroLoja()">📍 Marcar localização da loja</button><div id="cad-gps-loja-status" class="meta" style="margin-top:6px">Obrigatório para calcular o frete e guiar o entregador.</div></div>
       <div class="form-group"><label>Chave Pix (para receber)</label><input type="text" id="cad-pix" placeholder="CPF, email, telefone ou chave aleatória"></div>
       <div class="form-group"><label>Categorias atendidas pela loja</label><div id="cad-categorias-list" class="category-options">Carregando categorias...</div></div>
-      <div class="form-group"><label>Plano da loja — comissão inicial de 10%</label><select id="cad-plano"><option value="entrega_obraexpress">🛵 Entrega ObraExpress — nossos entregadores</option><option value="loja">🏪 Plano Loja — a própria loja entrega</option></select></div>
-      <div class="form-group"><label>Taxa de entrega por KM (R$)</label><input type="number" id="cad-taxa" value="2" step="0.5"></div>
+      <div class="form-group"><label>Plano da loja — 5% nos primeiros 5 meses; depois 7%</label><select id="cad-plano"><option value="entrega_obraexpress">🛵 Entrega ObraExpress — nossos entregadores</option><option value="loja">🏪 Plano Loja — a própria loja entrega</option></select></div>
       <div class="form-group"><label>Tempo de preparo</label><input type="text" id="cad-tempo" value="30-60 min" placeholder="Ex: 30-60 min"></div>
       <div class="form-group"><label>Descrição</label><textarea id="cad-descricao" placeholder="Fale sobre sua loja..."></textarea></div>
       <div class="form-group"><label>Senha</label><input type="password" id="cad-senha" placeholder="Crie uma senha"></div>
@@ -100,6 +100,7 @@ let pedidosConhecidosLoja = null;
 let monitorPedidosLoja = null;
 let audioLoja = null;
 let alertasLojaAtivos = localStorage.getItem('alertas_som_loja') === '1';
+let cadastroLojaLocalizacao = null;
 
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',3000);}
 async function api(path,opts={}){const h={'Content-Type':'application/json'};if(token)h['Authorization']='Bearer '+token;try{const r=await fetch(API+path,{...opts,headers:h});return await r.json()}catch(e){return{error:e.message}}}
@@ -162,6 +163,19 @@ async function loginLoja(){
   toast('Bem-vindo, '+loja.nome+'!');entrarDashboard();
 }
 
+function capturarLocalizacaoCadastroLoja(){
+  if(!navigator.geolocation)return toast('Este aparelho não oferece localização GPS');
+  const status=document.getElementById('cad-gps-loja-status');
+  status.textContent='📍 Buscando localização... permita o acesso ao GPS.';
+  navigator.geolocation.getCurrentPosition(pos=>{
+    cadastroLojaLocalizacao={latitude:pos.coords.latitude,longitude:pos.coords.longitude};
+    status.textContent='✅ Localização da loja marcada.';
+  },erro=>{
+    const mensagens={1:'Permissão do GPS negada.',2:'Não foi possível encontrar a loja.',3:'O GPS demorou para responder.'};
+    status.textContent='⚠️ '+(mensagens[erro.code]||'Verifique o GPS do aparelho.');
+  },{enableHighAccuracy:true,timeout:20000,maximumAge:10000});
+}
+
 async function cadastroLoja(){
   const d={
     nome:document.getElementById('cad-nome').value,
@@ -172,13 +186,15 @@ async function cadastroLoja(){
     chave_pix:document.getElementById('cad-pix').value,
     categorias:categoriasSelecionadasCadastro(),
     plano:document.getElementById('cad-plano').value,
-    taxa_entrega_km:parseFloat(document.getElementById('cad-taxa').value)||2,
+    latitude:cadastroLojaLocalizacao?.latitude,
+    longitude:cadastroLojaLocalizacao?.longitude,
     tempo_entrega_min:document.getElementById('cad-tempo').value,
     descricao:document.getElementById('cad-descricao').value,
     senha:document.getElementById('cad-senha').value
   };
   if(!d.nome||!d.email||!d.senha)return toast('Preencha nome, email e senha');
   if(!d.categorias)return toast('Escolha pelo menos uma categoria');
+  if(!cadastroLojaLocalizacao)return toast('Marque a localização GPS da loja');
   const r=await api('/api/lojas/cadastro',{method:'POST',body:JSON.stringify(d)});
   if(r.error)return toast(r.error);
   token=r.token;loja=r.loja;
@@ -238,7 +254,7 @@ async function carregarPedidosLoja(){
       <div class="total">R$ ${p.total_final.toFixed(2)}</div>
       <div class="finance-box">
         Produtos: R$ ${Number(p.total_produtos||0).toFixed(2)}<br>
-        Comissão ObraExpress (${Number(p.comissao_loja_percentual||10).toFixed(0)}%): - R$ ${Number(p.valor_comissao_loja||0).toFixed(2)}<br>
+        Comissão ObraExpress (${Number(p.comissao_loja_percentual||5).toFixed(0)}%): - R$ ${Number(p.valor_comissao_loja||0).toFixed(2)}<br>
         <strong>Líquido da loja: R$ ${Number(p.valor_liquido_loja||0).toFixed(2)}</strong>
       </div>
       
@@ -397,9 +413,12 @@ async function carregarPerfilLoja(){
     <div class="card">
       <h3>🏪 ${loja.nome}</h3>
       <div class="meta">📧 ${loja.email}</div>
-      <div class="meta">🛵 R$ ${loja.taxa_entrega_km}/km</div>
       <div class="meta">📄 ${nomePlano}</div>
-      <div class="meta">💼 Comissão inicial: ${Number(loja.comissao_percentual||10).toFixed(0)}%</div>
+      <div class="meta">💼 Comissão atual: ${Number(loja.comissao_percentual||5).toFixed(0)}% — começa na primeira venda concluída e muda para 7% após 5 meses</div>
+      <div class="finance-box" style="${loja.latitude&&loja.longitude?'':'background:#FFF3E0'}">
+        ${loja.latitude&&loja.longitude?'✅ GPS da loja cadastrado':'⚠️ GPS da loja não cadastrado. Sem ele o cliente não consegue pedir entrega.'}
+        <button class="btn btn-primary btn-sm" onclick="atualizarLocalizacaoLoja()">📍 ${loja.latitude&&loja.longitude?'Atualizar':'Cadastrar'} localização da loja</button>
+      </div>
       <div class="form-group" style="padding:0;margin-top:10px"><label>Plano para os próximos pedidos</label><select id="perfil-plano"><option value="entrega_obraexpress" ${loja.plano!=='loja'?'selected':''}>🛵 Entrega ObraExpress</option><option value="loja" ${loja.plano==='loja'?'selected':''}>🏪 A própria loja entrega</option></select></div>
       <button class="btn btn-primary btn-sm" onclick="alterarPlanoLoja()">Salvar plano</button>
     </div>
@@ -433,11 +452,27 @@ async function carregarPerfilLoja(){
   });
 }
 
+function atualizarLocalizacaoLoja(){
+  if(!navigator.geolocation)return toast('Este aparelho não oferece localização GPS');
+  toast('Buscando a localização da loja...');
+  navigator.geolocation.getCurrentPosition(async pos=>{
+    const latitude=pos.coords.latitude,longitude=pos.coords.longitude;
+    const r=await api('/api/lojas/'+loja.id,{method:'PUT',body:JSON.stringify({latitude,longitude})});
+    if(r.error)return toast(r.error);
+    loja.latitude=latitude;loja.longitude=longitude;
+    localStorage.setItem('loja',JSON.stringify(loja));
+    toast('✅ Localização da loja atualizada');carregarPerfilLoja();
+  },erro=>{
+    const mensagens={1:'Permissão do GPS negada.',2:'Não foi possível encontrar a loja.',3:'O GPS demorou para responder.'};
+    toast(mensagens[erro.code]||'Verifique o GPS do aparelho.');
+  },{enableHighAccuracy:true,timeout:20000,maximumAge:10000});
+}
+
 async function alterarPlanoLoja(){
   const plano=document.getElementById('perfil-plano').value;
   const r=await api('/api/lojas/'+loja.id,{method:'PUT',body:JSON.stringify({plano})});
   if(r.error)return toast(r.error);
-  loja.plano=plano;loja.comissao_percentual=10;
+  loja.plano=plano;
   localStorage.setItem('loja',JSON.stringify(loja));
   toast('Plano atualizado para os próximos pedidos');carregarPerfilLoja();
 }

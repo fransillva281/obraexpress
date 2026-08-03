@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { buildRunSql, isUniqueViolation, toPostgresSql } = require('../database-utils');
-const { calcularFinanceiroPedido, normalizarPlanoLoja } = require('../financial-utils');
+const { calcularFinanceiroPedido, calcularPercentualPromocional, normalizarPlanoLoja } = require('../financial-utils');
 
 test('converte placeholders para o formato do PostgreSQL', () => {
   assert.equal(
@@ -70,34 +70,40 @@ test('painel administrativo trata sessão vencida e permite sair', () => {
   assert.match(admin, /Sua sessão venceu/);
 });
 
-test('aplica comissão inicial de 10% no plano Entrega ObraExpress', () => {
+test('aplica comissão promocional de 5% no plano Entrega ObraExpress', () => {
   const calculo = calcularFinanceiroPedido({
     totalProdutos: 100,
     taxaEntrega: 10,
     tipoEntrega: 'entrega',
     planoLoja: 'entrega_obraexpress',
-    comissaoPercentual: 10,
-    percentualEntregador: 85
+    comissaoPercentual: 5,
+    percentualEntregador: 95
   });
-  assert.equal(calculo.valorComissaoLoja, 10);
-  assert.equal(calculo.valorLiquidoLoja, 90);
-  assert.equal(calculo.valorMotoboy, 8.5);
-  assert.equal(calculo.valorPlataformaEntrega, 1.5);
+  assert.equal(calculo.valorComissaoLoja, 5);
+  assert.equal(calculo.valorLiquidoLoja, 95);
+  assert.equal(calculo.valorMotoboy, 9.5);
+  assert.equal(calculo.valorPlataformaEntrega, 0.5);
   assert.equal(calculo.totalFinal, 110);
 });
 
-test('aplica comissão de 10% e repassa o frete no Plano Loja', () => {
+test('aplica comissão de 5% e repassa o frete no Plano Loja', () => {
   const calculo = calcularFinanceiroPedido({
     totalProdutos: 100,
     taxaEntrega: 10,
     tipoEntrega: 'entrega',
     planoLoja: 'loja',
-    comissaoPercentual: 10
+    comissaoPercentual: 5
   });
-  assert.equal(calculo.valorComissaoLoja, 10);
-  assert.equal(calculo.valorLiquidoLoja, 100);
+  assert.equal(calculo.valorComissaoLoja, 5);
+  assert.equal(calculo.valorLiquidoLoja, 105);
   assert.equal(calculo.valorMotoboy, 0);
   assert.equal(calculo.valorPlataformaEntrega, 0);
+});
+
+test('muda a comissão promocional de 5% para 7% após cinco meses', () => {
+  assert.equal(calcularPercentualPromocional(null, new Date('2026-08-03T00:00:00Z')), 5);
+  assert.equal(calcularPercentualPromocional('2026-06-01T00:00:00Z', new Date('2026-08-03T00:00:00Z')), 5);
+  assert.equal(calcularPercentualPromocional('2026-01-01T00:00:00Z', new Date('2026-08-03T00:00:00Z')), 7);
 });
 
 test('plano antigo ou inválido migra para Entrega ObraExpress', () => {
@@ -109,5 +115,23 @@ test('schema contém saldo e extrato financeiro das lojas', () => {
   const schema = fs.readFileSync(path.join(__dirname, '..', 'db', 'schema.sql'), 'utf8');
   assert.match(schema, /CREATE TABLE IF NOT EXISTS saldo_lojas/);
   assert.match(schema, /CREATE TABLE IF NOT EXISTS movimentacoes_lojas/);
-  assert.match(schema, /comissao_percentual NUMERIC\(5,2\) DEFAULT 10\.00/);
+  assert.match(schema, /comissao_percentual NUMERIC\(5,2\) DEFAULT 5\.00/);
+  assert.match(schema, /CREATE TABLE IF NOT EXISTS configuracoes_plataforma/);
+  assert.match(schema, /inicio_promocao TIMESTAMPTZ/);
+});
+
+test('GPS e frete dinâmico estão ligados nas quatro interfaces', () => {
+  const raiz = path.join(__dirname, '..');
+  const servidor = fs.readFileSync(path.join(raiz, 'server.js'), 'utf8');
+  const cliente = fs.readFileSync(path.join(raiz, 'frontend', 'index.html'), 'utf8');
+  const loja = fs.readFileSync(path.join(raiz, 'loja', 'index.html'), 'utf8');
+  const entregador = fs.readFileSync(path.join(raiz, 'entregador', 'index.html'), 'utf8');
+  const admin = fs.readFileSync(path.join(raiz, 'admin', 'index.html'), 'utf8');
+  assert.match(servidor, /\/api\/frete\/cotacao/);
+  assert.match(servidor, /calcularCotacaoFrete/);
+  assert.match(cliente, /capturarLocalizacaoEntrega/);
+  assert.match(loja, /atualizarLocalizacaoLoja/);
+  assert.match(entregador, /Rota 1: ir até a loja/);
+  assert.match(entregador, /Rota 2: ir até o cliente/);
+  assert.match(admin, /configuracoes-entrega/);
 });

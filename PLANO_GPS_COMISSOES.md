@@ -1,4 +1,4 @@
-# Plano da próxima etapa — GPS, ganhos e comissões
+# GPS, frete e comissões — versão implementada
 
 ## Regra recomendada
 
@@ -7,7 +7,7 @@ Separar a rota em duas distâncias:
 1. **Coleta:** posição do entregador até a loja.
 2. **Entrega:** loja até o endereço do cliente.
 
-O sistema deve guardar as duas distâncias no pedido. Isso deixa claro quanto o entregador percorreu e evita misturar quilômetros.
+O painel do entregador abre duas rotas: da posição atual até a loja e, depois da coleta, da loja até o ponto GPS do cliente.
 
 ## Modelo financeiro recomendado para começar
 
@@ -24,30 +24,34 @@ Valores iniciais apenas para simulação, antes de validação comercial:
 | Configuração | Exemplo inicial |
 |---|---:|
 | Taxa base de entrega | R$ 5,00 |
-| Preço ao cliente por km de entrega | R$ 2,50 |
-| Ganho do entregador por km total | R$ 2,00 |
-| Ganho mínimo do entregador | R$ 8,00 |
-| Comissão da plataforma sobre produtos | 10% nos dois planos |
-| Raio inicial para chamar entregadores | 5 km |
+| Preço inicial por km de entrega | R$ 2,00 |
+| Fator de aproximação da rota | 1,20 |
+| Adicional de chuva | 15% |
+| Adicional de horário de pico | 10% |
+| Limite combinado dos adicionais | 25% |
+| Comissão promocional da plataforma | 5%; depois 7% |
 
 ### Exemplo
 
 - Produtos: R$ 100,00.
 - Entregador até a loja: 2 km.
 - Loja até o cliente: 5 km.
-- Cliente paga pela entrega: R$ 5,00 + 5 × R$ 2,50 = R$ 17,50.
-- Entregador percorre 7 km e recebe 7 × R$ 2,00 = R$ 14,00.
-- Plataforma fica com R$ 3,50 da entrega.
-- Comissão da venda: 10% de R$ 100,00 = R$ 10,00.
-- Loja recebe R$ 90,00 pelos produtos no plano Entrega ObraExpress.
-- Receita bruta da plataforma nesse exemplo: R$ 13,50.
+- Cliente paga a cotação mostrada antes da confirmação.
+- Durante a promoção, o entregador recebe 95% do frete e a plataforma 5%.
+- Comissão promocional da venda: 5% de R$ 100,00 = R$ 5,00.
+- Loja recebe R$ 95,00 pelos produtos no plano Entrega ObraExpress.
 
 Esses números são exemplos para testar a lógica, não uma decisão comercial definitiva.
 
 ## O que já foi criado
 
 - Dois planos: Loja e Entrega ObraExpress.
-- Comissão inicial de 10% sobre os produtos nos dois planos.
+- Comissão de 5% nos cinco primeiros meses e 7% depois.
+- Início da promoção gravado na primeira venda ou entrega concluída.
+- Cotação de frete protegida no servidor.
+- GPS obrigatório para a loja e para a entrega do cliente.
+- Adicionais de chuva e pico limitados a 25%.
+- Painel administrativo para alterar base, valor por km, clima e situação das entregas.
 - Preços e quantidades recalculados no servidor.
 - Regra financeira congelada em cada pedido.
 - Saldo e extrato calculado da loja.
@@ -56,20 +60,17 @@ Esses números são exemplos para testar a lógica, não uma decisão comercial 
 
 ## O que ainda precisa ser criado
 
-- Campos no banco para distância de coleta, distância de entrega e distância total.
-- Tabela de configurações financeiras com histórico de alterações.
 - Cálculo de rota por ruas usando um serviço de mapas. A fórmula atual mede linha reta e serve apenas como aproximação.
-- Atualização periódica da posição do entregador durante a corrida.
-- Tela do administrador com venda, repasse da loja, ganho do entregador e receita da plataforma separados.
+- Histórico das alterações da tabela de configurações.
+- Distribuição automática de corridas por proximidade.
 - Integração com pagamento e repasses bancários reais.
 
 ## Ordem segura de implementação
 
-1. Configurações e novos campos no banco.
-2. Cálculo de rota e preço antes da confirmação do pedido.
-3. Escolha de entregadores próximos e cálculo da coleta.
-4. Congelamento dos valores no pedido aceito.
-5. Extratos e painel administrativo.
-6. Integração de pagamento e repasses.
+1. Publicar e testar GPS/frete com contas de teste.
+2. Escolher e criar a conta no provedor Pix.
+3. Integrar criação do QR Code Pix.
+4. Liberar o pedido para a loja somente após a confirmação automática do pagamento.
+5. Validar os repasses antes de operar com dinheiro real.
 
 Antes de cobrar clientes ou repassar dinheiro de verdade, as porcentagens, contratos, impostos e regras de entregadores e lojas devem ser revisados com um adulto responsável e profissionais de contabilidade e direito.
