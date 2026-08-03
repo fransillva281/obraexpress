@@ -23,6 +23,7 @@ body{background:var(--bg);color:var(--texto)}
 .btn-sm{padding:6px 12px;font-size:12px}
 .tag{display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600}
 .tag-aguardando{background:#FFF3E0;color:#E65100}
+.tag-aguardando_confirmacao{background:#FFF8E1;color:#F57F17}
 .tag-confirmado{background:#E3F2FD;color:#1565C0}
 .tag-separado{background:#F3E5F5;color:#7B1FA2}
 .tag-saiu_entrega{background:#E8F5E9;color:#2E7D32}
@@ -117,6 +118,10 @@ body{background:var(--bg);color:var(--texto)}
         <div id="saldos-entregadores"></div>
       </div>
       <div class="card">
+        <h3>🏪 Saldo calculado das Lojas — comissão 10%</h3>
+        <div id="saldos-lojas"></div>
+      </div>
+      <div class="card">
         <h3>📊 Histórico Plataforma</h3>
         <div id="historico-plataforma"></div>
       </div>
@@ -164,7 +169,7 @@ async function carregarDashboard() {
   
   if (r.ultimosPedidos) {
     const statusLabels = {
-      'aguardando': '⏳ Aguardando', 'confirmado': '✅ Confirmado',
+      'aguardando_confirmacao': '⏳ Cliente confirmando', 'aguardando': '⏳ Aguardando loja', 'confirmado': '✅ Confirmado',
       'separado': '🟣 Separado', 'saiu_entrega': '🛵 Saiu p/ entrega',
       'entregue': '📦 Entregue', 'cancelado': '❌ Cancelado'
     };
@@ -184,7 +189,7 @@ async function carregarPedidos(status) {
   const url = status ? '/api/admin/pedidos?status='+status : '/api/admin/pedidos';
   const r = await api(url);
   const statusLabels = {
-    'aguardando': '⏳ Aguardando', 'confirmado': '✅ Confirmado',
+    'aguardando_confirmacao': '⏳ Cliente confirmando', 'aguardando': '⏳ Aguardando loja', 'confirmado': '✅ Confirmado',
     'separado': '🟣 Separado', 'saiu_entrega': '🛵 Saiu p/ entrega',
     'entregue': '📦 Entregue', 'cancelado': '❌ Cancelado'
   };
@@ -195,6 +200,7 @@ async function carregarPedidos(status) {
         <span class="tag tag-${p.status}">${statusLabels[p.status] || p.status}</span>
       </div>
       <div class="info">👤 ${p.cliente_nome}${p.entregador_nome ? ' • 🛵 '+p.entregador_nome : ' • ⏳ Sem entregador'} • R$ ${p.total_final.toFixed(2)} • ${p.data_pedido}</div>
+      <div class="info">Produtos: R$ ${Number(p.total_produtos||0).toFixed(2)} • Comissão loja: R$ ${Number(p.valor_comissao_loja||0).toFixed(2)} • Líquido loja: R$ ${Number(p.valor_liquido_loja||0).toFixed(2)}</div>
     </div>
   `).join('');
 }
@@ -214,6 +220,16 @@ async function carregarFinanceiro() {
       </div>
     `).join('');
   }
+
+  document.getElementById('saldos-lojas').innerHTML = (r.saldoLojas || []).map(l => `
+    <div class="pedido-item">
+      <div class="flex">
+        <span><strong>🏪 ${l.loja_nome}</strong></span>
+        <span style="color:var(--verde);font-weight:700">R$ ${Number(l.saldo||0).toFixed(2)}</span>
+      </div>
+      <div class="info">Plano: ${l.plano==='loja'?'Loja — entrega própria':'Entrega ObraExpress'} • Comissão: ${Number(l.comissao_percentual||10).toFixed(0)}% • Pix: ${l.chave_pix || 'Não cadastrou'}</div>
+    </div>
+  `).join('') || '<div class="info">Nenhuma loja com venda concluída.</div>';
   
   if (r.saldoPlataforma) {
     document.getElementById('historico-plataforma').innerHTML = r.saldoPlataforma.map(h => `

@@ -8,9 +8,15 @@ const {
   dbAll,
   dbGet,
   dbRun,
+  dbTransaction,
   getDatabaseHealth,
   isUniqueViolation
 } = require('./database');
+const {
+  arredondarDinheiro,
+  calcularFinanceiroPedido,
+  normalizarPlanoLoja
+} = require('./financial-utils');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -29,10 +35,11 @@ const ADMIN_PASSWORD = requireEnvironment('ADMIN_PASSWORD');
 const PLATAFORMA = {
   nome: 'ObraExpress',
   perc_motoboy: 0.85,    // 85% da taxa de entrega pro motoboy
-  perc_plataforma: 0.15, // 15% da taxa de entrega pra plataforma (Adalto)
-  mensalidade_loja: 70,  // R$ 70/mês (opcional)
-  comissao_pedido: 0.10  // 10% por pedido (plano comissão)
+  perc_plataforma: 0.15, // 15% temporário da taxa de entrega para a plataforma
+  mensalidade_loja: 0,   // Sem mensalidade na fase inicial
+  comissao_pedido: 0.10  // 10% sobre os produtos nos dois planos
 };
+const TAXA_ENTREGA_TEMPORARIA = 5;
 
 // Middleware
 app.use(cors());
@@ -109,13 +116,16 @@ function authAdmin(req, res, next) {
 
 // ============ LOJAS API ============
 app.post('/api/lojas/cadastro', async (req, res) => {
-  const { nome, email, senha, telefone, endereco, bairro, latitude, longitude, descricao, categorias, taxa_entrega_km, chave_pix } = req.body;
+  const { nome, email, senha, telefone, endereco, bairro, latitude, longitude, descricao, categorias, taxa_entrega_km, chave_pix, plano, tempo_entrega_min } = req.body;
   try {
+    if (!nome || !email || !senha) return res.status(400).json({ error: 'Nome, email e senha são obrigatórios' });
+    const planoEscolhido = normalizarPlanoLoja(plano);
     const hash = bcrypt.hashSync(senha, 10);
-    const result = await dbRun('INSERT INTO lojas (nome, email, senha, telefone, endereco, bairro, latitude, longitude, descricao, categorias, taxa_entrega_km, chave_pix) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', 
-      [nome, email, hash, telefone, endereco, bairro, latitude, longitude, descricao, categorias, taxa_entrega_km || 2.00, chave_pix || null]);
+    const taxaKm = Number(taxa_entrega_km || 2);
+    const result = await dbRun('INSERT INTO lojas (nome, email, senha, telefone, endereco, bairro, latitude, longitude, descricao, categorias, taxa_entrega_km, chave_pix, plano, comissao_percentual, tempo_entrega_min) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', 
+      [nome, email, hash, telefone, endereco, bairro, latitude, longitude, descricao, categorias, taxaKm, chave_pix || null, planoEscolhido, 10, tempo_entrega_min || '30-60 min']);
     const token = jwt.sign({ id: result.lastID, tipo: 'loja' }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ success: true, id: result.lastID, token, loja: { id: result.lastID, nome, email } });
+    res.json({ success: true, id: result.lastID, token, loja: { id: result.lastID, nome, email, plano: planoEscolhido, comissao_percentual: 10, taxa_entrega_km: taxaKm, chave_pix: chave_pix || null } });
   } catch (e) {
     if (isUniqueViolation(e)) return res.status(400).json({ error: 'Email já cadastrado' });
     console.error('Erro ao cadastrar loja:', e);
@@ -129,12 +139,12 @@ app.post('/api/lojas/login', async (req, res) => {
   if (!loja) return res.status(401).json({ error: 'Email não encontrado' });
   if (!bcrypt.compareSync(senha, loja.senha)) return res.status(401).json({ error: 'Senha incorreta' });
   const token = jwt.sign({ id: loja.id, tipo: 'loja' }, JWT_SECRET, { expiresIn: '7d' });
-  res.json({ success: true, token, loja: { id: loja.id, nome: loja.nome, email: loja.email, logo: loja.logo, aberto: loja.aberto, taxa_entrega_km: loja.taxa_entrega_km, chave_pix: loja.chave_pix } });
+  res.json({ success: true, token, loja: { id: loja.id, nome: loja.nome, email: loja.email, logo: loja.logo, aberto: loja.aberto, taxa_entrega_km: loja.taxa_entrega_km, chave_pix: loja.chave_pix, plano: normalizarPlanoLoja(loja.plano), comissao_percentual: Number(loja.comissao_percentual || 10) } });
 });
 
 app.get('/api/lojas', async (req, res) => {
   const { categoria, bairro, busca } = req.query;
-  let sql = 'SELECT id, nome, logo, descricao, categorias, endereco, bairro, taxa_entrega_km, entrega_gratis_ate, tempo_entrega_min, aberto, latitude, longitude FROM lojas WHERE aberto = 1';
+  let sql = 'SELECT id, nome, logo, descricao, categorias, endereco, bairro, taxa_entrega_km, entrega_gratis_ate, tempo_entrega_min, aberto, latitude, longitude, plano, comissao_percentual FROM lojas WHERE aberto = 1';
   const params = [];
   if (categoria) { sql += ' AND categorias LIKE ?'; params.push(`%${categoria}%`); }
   if (bairro) { sql += ' AND bairro LIKE ?'; params.push(`%${bairro}%`); }
@@ -145,7 +155,7 @@ app.get('/api/lojas', async (req, res) => {
 });
 
 app.get('/api/lojas/:id', async (req, res) => {
-  const loja = await dbGet('SELECT id, nome, logo, descricao, categorias, endereco, bairro, cidade, estado, telefone, whatsapp, chave_pix, taxa_entrega_km, entrega_gratis_ate, tempo_entrega_min, aberto, latitude, longitude FROM lojas WHERE id = ?', [req.params.id]);
+  const loja = await dbGet('SELECT id, nome, logo, descricao, categorias, endereco, bairro, cidade, estado, telefone, whatsapp, chave_pix, taxa_entrega_km, entrega_gratis_ate, tempo_entrega_min, aberto, latitude, longitude, plano, comissao_percentual FROM lojas WHERE id = ?', [req.params.id]);
   if (!loja) return res.status(404).json({ error: 'Loja não encontrada' });
   const produtos = await dbAll('SELECT * FROM produtos WHERE loja_id = ? AND ativo = 1 ORDER BY destaque DESC, nome', [req.params.id]);
   res.json({ loja, produtos });
@@ -153,7 +163,7 @@ app.get('/api/lojas/:id', async (req, res) => {
 
 app.put('/api/lojas/:id', authLojas, async (req, res) => {
   if (req.usuario.id != req.params.id) return res.status(403).json({ error: 'Permissão negada' });
-  const { nome, telefone, whatsapp, chave_pix, endereco, bairro, latitude, longitude, descricao, categorias, taxa_entrega_km, entrega_gratis_ate, tempo_entrega_min, aberto, logo } = req.body;
+  const { nome, telefone, whatsapp, chave_pix, endereco, bairro, latitude, longitude, descricao, categorias, taxa_entrega_km, entrega_gratis_ate, tempo_entrega_min, aberto, logo, plano } = req.body;
   const updates = [];
   const params = [];
   if (nome !== undefined) { updates.push('nome = ?'); params.push(nome); }
@@ -171,6 +181,7 @@ app.put('/api/lojas/:id', authLojas, async (req, res) => {
   if (tempo_entrega_min !== undefined) { updates.push('tempo_entrega_min = ?'); params.push(tempo_entrega_min); }
   if (aberto !== undefined) { updates.push('aberto = ?'); params.push(aberto ? 1 : 0); }
   if (logo !== undefined) { updates.push('logo = ?'); params.push(logo); }
+  if (plano !== undefined) { updates.push('plano = ?'); params.push(normalizarPlanoLoja(plano)); }
   if (updates.length === 0) return res.status(400).json({ error: 'Nada para atualizar' });
   params.push(req.params.id);
   await dbRun(`UPDATE lojas SET ${updates.join(', ')} WHERE id = ?`, params);
@@ -182,10 +193,13 @@ app.post('/api/produtos', authLojas, async (req, res) => {
   const { loja_id, nome, descricao, preco, foto, categoria, marca, unidade, estoque } = req.body;
   if (req.usuario.id != loja_id) return res.status(403).json({ error: 'Permissão negada' });
   if (!nome || !preco || Number(preco) <= 0) return res.status(400).json({ error: 'Informe o nome e um preço válido' });
+  if (!categoria) return res.status(400).json({ error: 'Escolha uma categoria' });
   try {
     const loja = await dbGet('SELECT id FROM lojas WHERE id = ?', [loja_id]);
     if (!loja) return res.status(404).json({ error: 'A loja desta sessão não foi encontrada no banco atual. Faça o cadastro novamente.' });
-    const result = await dbRun('INSERT INTO produtos (loja_id, nome, descricao, preco, foto, categoria, marca, unidade, estoque) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [loja_id, nome, descricao || null, Number(preco), foto || null, categoria || null, marca || null, unidade || 'un', estoque || 999]);
+    const categoriaOficial = await dbGet('SELECT nome FROM categorias WHERE LOWER(TRIM(nome)) = LOWER(TRIM(?))', [categoria]);
+    if (!categoriaOficial) return res.status(400).json({ error: 'Categoria inválida. Escolha uma opção da lista.' });
+    const result = await dbRun('INSERT INTO produtos (loja_id, nome, descricao, preco, foto, categoria, marca, unidade, estoque) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [loja_id, nome, descricao || null, Number(preco), foto || null, categoriaOficial.nome, marca || null, unidade || 'un', estoque || 999]);
     const produto = await dbGet('SELECT * FROM produtos WHERE id = ?', [result.lastID]);
     if (!produto) return res.status(500).json({ error: 'O produto não foi confirmado no banco de dados' });
     res.json({ success: true, id: result.lastID, produto });
@@ -205,7 +219,11 @@ app.put('/api/produtos/:id', authLojas, async (req, res) => {
   if (descricao !== undefined) { updates.push('descricao = ?'); params.push(descricao); }
   if (preco !== undefined) { updates.push('preco = ?'); params.push(preco); }
   if (foto !== undefined) { updates.push('foto = ?'); params.push(foto); }
-  if (categoria !== undefined) { updates.push('categoria = ?'); params.push(categoria); }
+  if (categoria !== undefined) {
+    const categoriaOficial = await dbGet('SELECT nome FROM categorias WHERE LOWER(TRIM(nome)) = LOWER(TRIM(?))', [categoria]);
+    if (!categoriaOficial) return res.status(400).json({ error: 'Categoria inválida. Escolha uma opção da lista.' });
+    updates.push('categoria = ?'); params.push(categoriaOficial.nome);
+  }
   if (marca !== undefined) { updates.push('marca = ?'); params.push(marca); }
   if (unidade !== undefined) { updates.push('unidade = ?'); params.push(unidade); }
   if (estoque !== undefined) { updates.push('estoque = ?'); params.push(estoque); }
@@ -226,13 +244,18 @@ app.delete('/api/produtos/:id', authLojas, async (req, res) => {
 });
 
 app.get('/api/produtos', async (req, res) => {
-  const { categoria, loja_id, busca } = req.query;
+  const { categoria, loja_id, busca, ordem } = req.query;
   let sql = 'SELECT p.*, l.nome as loja_nome, l.logo as loja_logo, l.bairro as loja_bairro FROM produtos p JOIN lojas l ON p.loja_id = l.id WHERE p.ativo = 1 AND l.aberto = 1';
   const params = [];
-  if (categoria) { sql += ' AND p.categoria = ?'; params.push(categoria); }
+  if (categoria) { sql += ' AND LOWER(TRIM(p.categoria)) = LOWER(TRIM(?))'; params.push(categoria); }
   if (loja_id) { sql += ' AND p.loja_id = ?'; params.push(loja_id); }
-  if (busca) { sql += ' AND (p.nome LIKE ? OR p.descricao LIKE ?)'; params.push(`%${busca}%`, `%${busca}%`); }
-  sql += ' ORDER BY p.destaque DESC, p.nome';
+  if (busca) {
+    sql += ' AND (p.nome ILIKE ? OR p.descricao ILIKE ? OR p.marca ILIKE ? OR p.categoria ILIKE ?)';
+    params.push(`%${busca}%`, `%${busca}%`, `%${busca}%`, `%${busca}%`);
+  }
+  sql += ordem === 'menor_preco'
+    ? ' ORDER BY p.preco ASC, p.nome ASC, l.nome ASC'
+    : ' ORDER BY p.destaque DESC, p.nome ASC';
   const produtos = await dbAll(sql, params);
   res.json({ produtos });
 });
@@ -339,22 +362,105 @@ app.get('/api/entregadores/:id/saldo', authEntregador, async (req, res) => {
   res.json({ saldo });
 });
 
+// Saldo e extrato calculado da loja. O repasse real será integrado ao provedor de pagamento depois.
+app.get('/api/lojas/:id/financeiro', authLojas, async (req, res) => {
+  if (req.usuario.id != req.params.id) return res.status(403).json({ error: 'Permissão negada' });
+  let saldo = await dbGet(`SELECT loja_id, saldo::double precision AS saldo,
+    total_recebido::double precision AS total_recebido,
+    total_sacado::double precision AS total_sacado
+    FROM saldo_lojas WHERE loja_id = ?`, [req.params.id]);
+  if (!saldo) {
+    await dbRun('INSERT INTO saldo_lojas (loja_id) VALUES (?) ON CONFLICT (loja_id) DO NOTHING', [req.params.id]);
+    saldo = { loja_id: Number(req.params.id), saldo: 0, total_recebido: 0, total_sacado: 0 };
+  }
+  const movimentacoes = await dbAll(`SELECT id, pedido_id, descricao,
+    valor_bruto::double precision AS valor_bruto,
+    valor_comissao::double precision AS valor_comissao,
+    valor_liquido::double precision AS valor_liquido, tipo, data
+    FROM movimentacoes_lojas WHERE loja_id = ? ORDER BY data DESC LIMIT 50`, [req.params.id]);
+  res.json({ saldo, movimentacoes });
+});
+
 // ============ PEDIDOS API (NOVO FLUXO COMPLETO) ============
 
-// Cliente faz pedido
+async function montarItensPedido(lojaId, itens) {
+  if (!Array.isArray(itens) || itens.length === 0) throw new Error('Carrinho vazio');
+  const quantidades = new Map();
+  for (const item of itens) {
+    const id = Number(item.id);
+    const quantidade = Number(item.qty);
+    if (!Number.isInteger(id) || !Number.isInteger(quantidade) || quantidade < 1 || quantidade > 999) {
+      throw new Error('Item ou quantidade inválida');
+    }
+    quantidades.set(id, (quantidades.get(id) || 0) + quantidade);
+  }
+  const ids = [...quantidades.keys()];
+  const marcadores = ids.map(() => '?').join(', ');
+  const produtos = await dbAll(`SELECT id, loja_id, nome, preco, estoque FROM produtos
+    WHERE id IN (${marcadores}) AND ativo = 1`, ids);
+  if (produtos.length !== ids.length) throw new Error('Um produto não está mais disponível');
+
+  let total = 0;
+  const itensConfirmados = produtos.map(produto => {
+    if (Number(produto.loja_id) !== Number(lojaId)) throw new Error('Todos os produtos precisam ser da mesma loja');
+    const qty = quantidades.get(Number(produto.id));
+    if (Number(produto.estoque) < qty) throw new Error(`Estoque insuficiente para ${produto.nome}`);
+    const preco = Number(produto.preco);
+    total += preco * qty;
+    return { id: produto.id, nome: produto.nome, preco, qty };
+  });
+  return { itens: itensConfirmados, totalProdutos: arredondarDinheiro(total) };
+}
+
+// Cliente faz pedido. Preços e comissão são sempre recalculados no servidor.
 app.post('/api/pedidos', authCliente, async (req, res) => {
-  const { loja_id, itens, total_produtos, taxa_entrega, tipo_entrega, endereco_entrega, bairro_entrega, latitude_entrega, longitude_entrega, distancia_km, forma_pagamento, observacao } = req.body;
-  const total_final = total_produtos + (taxa_entrega || 0);
-  const codigo = Math.random().toString(36).substring(2, 8).toUpperCase();
-  
-  // Calcular quanto o motoboy e a plataforma ganham
-  const valor_motoboy = Math.round((taxa_entrega || 0) * PLATAFORMA.perc_motoboy * 100) / 100;
-  const valor_plataforma = Math.round((taxa_entrega || 0) * PLATAFORMA.perc_plataforma * 100) / 100;
-  
-  const result = await dbRun('INSERT INTO pedidos (cliente_id, loja_id, itens, total_produtos, taxa_entrega, total_final, tipo_entrega, endereco_entrega, bairro_entrega, latitude_entrega, longitude_entrega, distancia_km, forma_pagamento, observacao, codigo_retirada, valor_motoboy, valor_plataforma) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', 
-    [req.usuario.id, loja_id, JSON.stringify(itens), total_produtos, taxa_entrega || 0, total_final, tipo_entrega, endereco_entrega, bairro_entrega, latitude_entrega, longitude_entrega, distancia_km || 0, forma_pagamento || 'entrega', observacao, tipo_entrega === 'retirada' ? codigo : null, valor_motoboy, valor_plataforma]);
-  
-  res.json({ success: true, pedido_id: result.lastID, codigo_retirada: tipo_entrega === 'retirada' ? codigo : null, total_final, valor_motoboy, valor_plataforma });
+  try {
+    const { loja_id, itens, tipo_entrega, endereco_entrega, bairro_entrega, latitude_entrega, longitude_entrega, distancia_km, forma_pagamento, observacao } = req.body;
+    if (!['entrega', 'retirada'].includes(tipo_entrega)) return res.status(400).json({ error: 'Tipo de entrega inválido' });
+    if (tipo_entrega === 'entrega' && !endereco_entrega) return res.status(400).json({ error: 'Informe o endereço de entrega' });
+    const loja = await dbGet('SELECT id, plano, comissao_percentual FROM lojas WHERE id = ? AND aberto = 1', [loja_id]);
+    if (!loja) return res.status(404).json({ error: 'Loja não encontrada ou fechada' });
+    const carrinho = await montarItensPedido(loja_id, itens);
+    const taxaEntrega = tipo_entrega === 'entrega' ? TAXA_ENTREGA_TEMPORARIA : 0;
+    const financeiro = calcularFinanceiroPedido({
+      totalProdutos: carrinho.totalProdutos,
+      taxaEntrega,
+      tipoEntrega: tipo_entrega,
+      planoLoja: loja.plano,
+      comissaoPercentual: 10,
+      percentualEntregador: PLATAFORMA.perc_motoboy * 100
+    });
+    const codigo = Math.random().toString(36).substring(2, 8).toUpperCase();
+
+    const result = await dbRun(`INSERT INTO pedidos
+      (cliente_id, loja_id, itens, total_produtos, taxa_entrega, total_final, tipo_entrega,
+       endereco_entrega, bairro_entrega, latitude_entrega, longitude_entrega, distancia_km,
+       forma_pagamento, observacao, codigo_retirada, status, valor_motoboy, valor_plataforma,
+       plano_loja, comissao_loja_percentual, valor_comissao_loja, valor_liquido_loja)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [req.usuario.id, loja_id, JSON.stringify(carrinho.itens), carrinho.totalProdutos,
+       financeiro.taxaEntrega, financeiro.totalFinal, tipo_entrega, endereco_entrega,
+       bairro_entrega, latitude_entrega, longitude_entrega, distancia_km || 0,
+       forma_pagamento || 'pix', observacao, tipo_entrega === 'retirada' ? codigo : null, 'aguardando_confirmacao',
+       financeiro.valorMotoboy, financeiro.valorPlataformaEntrega, financeiro.planoLoja,
+       financeiro.comissaoPercentual, financeiro.valorComissaoLoja, financeiro.valorLiquidoLoja]);
+
+    res.json({
+      success: true,
+      pedido_id: result.lastID,
+      codigo_retirada: tipo_entrega === 'retirada' ? codigo : null,
+      total_produtos: carrinho.totalProdutos,
+      taxa_entrega: financeiro.taxaEntrega,
+      total_final: financeiro.totalFinal
+    });
+  } catch (error) {
+    const mensagensPermitidas = ['Carrinho vazio', 'Item ou quantidade inválida', 'Um produto não está mais disponível', 'Todos os produtos precisam ser da mesma loja'];
+    if (mensagensPermitidas.includes(error.message) || error.message.startsWith('Estoque insuficiente')) {
+      return res.status(400).json({ error: error.message });
+    }
+    console.error('Erro ao criar pedido:', error);
+    res.status(500).json({ error: 'Não foi possível criar o pedido' });
+  }
 });
 
 // Cliente confirma o pedido (vê o valor e decide)
@@ -362,12 +468,12 @@ app.put('/api/pedidos/:id/confirmar', authCliente, async (req, res) => {
   const pedido = await dbGet('SELECT * FROM pedidos WHERE id = ?', [req.params.id]);
   if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado' });
   if (pedido.cliente_id != req.usuario.id) return res.status(403).json({ error: 'Esse pedido não é seu' });
-  if (pedido.status !== 'aguardando') return res.status(400).json({ error: 'Pedido já foi processado' });
+  if (pedido.status !== 'aguardando_confirmacao') return res.status(400).json({ error: 'Pedido já foi processado' });
   
   const { confirmou } = req.body;
   if (confirmou) {
-    await dbRun("UPDATE pedidos SET cliente_confirmou = 1, status = 'confirmado', data_confirmacao = CURRENT_TIMESTAMP WHERE id = ?", [req.params.id]);
-    res.json({ success: true, message: 'Pedido confirmado com sucesso! Vai para a loja.' });
+    await dbRun("UPDATE pedidos SET cliente_confirmou = 1, status = 'aguardando', data_confirmacao = CURRENT_TIMESTAMP WHERE id = ?", [req.params.id]);
+    res.json({ success: true, message: 'Pedido enviado para a loja confirmar.' });
   } else {
     await dbRun("UPDATE pedidos SET status = 'cancelado' WHERE id = ?", [req.params.id]);
     res.json({ success: true, message: 'Pedido cancelado.' });
@@ -378,7 +484,9 @@ app.put('/api/pedidos/:id/confirmar', authCliente, async (req, res) => {
 app.get('/api/pedidos/loja/:loja_id', authLojas, async (req, res) => {
   if (req.usuario.id != req.params.loja_id) return res.status(403).json({ error: 'Permissão negada' });
   const { status } = req.query;
-  let sql = 'SELECT p.*, c.nome as cliente_nome, c.telefone as cliente_telefone, c.endereco_padrao, c.bairro FROM pedidos p JOIN clientes c ON p.cliente_id = c.id WHERE p.loja_id = ?';
+  let sql = `SELECT p.*, c.nome as cliente_nome, c.telefone as cliente_telefone, c.endereco_padrao, c.bairro
+    FROM pedidos p JOIN clientes c ON p.cliente_id = c.id
+    WHERE p.loja_id = ? AND p.status <> 'aguardando_confirmacao'`;
   const params = [req.params.loja_id];
   if (status) { sql += ' AND p.status = ?'; params.push(status); }
   sql += ' ORDER BY p.data_pedido DESC';
@@ -398,6 +506,19 @@ app.put('/api/pedidos/:id/separar', authLojas, async (req, res) => {
   
   await dbRun("UPDATE pedidos SET status = 'separado', separado_por = ?, data_separado = CURRENT_TIMESTAMP WHERE id = ?", [separado_por, req.params.id]);
   res.json({ success: true, message: 'Pedido separado e disponível para entrega!' });
+});
+
+// A loja inicia a entrega quando escolheu usar entregador próprio.
+app.put('/api/pedidos/:id/iniciar-entrega-loja', authLojas, async (req, res) => {
+  const pedido = await dbGet('SELECT * FROM pedidos WHERE id = ?', [req.params.id]);
+  if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado' });
+  if (pedido.loja_id != req.usuario.id) return res.status(403).json({ error: 'Esse pedido não é da sua loja' });
+  if (normalizarPlanoLoja(pedido.plano_loja) !== 'loja' || pedido.tipo_entrega !== 'entrega') {
+    return res.status(400).json({ error: 'Este pedido usa entrega ObraExpress ou retirada' });
+  }
+  if (pedido.status !== 'separado') return res.status(400).json({ error: 'O pedido precisa estar separado' });
+  await dbRun("UPDATE pedidos SET status = 'saiu_entrega', data_saida = CURRENT_TIMESTAMP WHERE id = ?", [req.params.id]);
+  res.json({ success: true, message: 'Pedido saiu para entrega pela loja' });
 });
 
 // Cliente vê seus pedidos
@@ -435,20 +556,18 @@ app.get('/api/pedidos/disponiveis', async (req, res) => {
     FROM pedidos p 
     JOIN lojas l ON p.loja_id = l.id 
     JOIN clientes c ON p.cliente_id = c.id 
-    WHERE p.status = 'separado' AND p.tipo_entrega = 'entrega' AND p.entregador_id IS NULL 
+    WHERE p.status = 'separado' AND p.tipo_entrega = 'entrega'
+      AND p.plano_loja = 'entrega_obraexpress' AND p.entregador_id IS NULL 
     ORDER BY p.data_pedido ASC`);
   res.json({ pedidos });
 });
 
 // ENTREGADOR: Aceitar pedido
 app.put('/api/pedidos/:id/aceitar', authEntregador, async (req, res) => {
-  const pedido = await dbGet('SELECT * FROM pedidos WHERE id = ?', [req.params.id]);
-  if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado' });
-  if (pedido.status !== 'separado') return res.status(400).json({ error: 'Pedido não está disponível' });
-  if (pedido.entregador_id) return res.status(400).json({ error: 'Outro entregador já pegou esse pedido' });
-  
-  await dbRun('UPDATE pedidos SET entregador_id = ?, status = ? WHERE id = ?', 
+  const atualizacao = await dbRun(`UPDATE pedidos SET entregador_id = ?, status = ?
+    WHERE id = ? AND status = 'separado' AND entregador_id IS NULL AND plano_loja = 'entrega_obraexpress'`,
     [req.usuario.id, 'em_coleta', req.params.id]);
+  if (!atualizacao.changes) return res.status(409).json({ error: 'Essa entrega não está mais disponível' });
   await dbRun('UPDATE entregadores SET disponivel = 0 WHERE id = ?', [req.usuario.id]);
   
   res.json({ success: true, message: 'Pedido aceito! Vá até a loja para buscar.' });
@@ -481,43 +600,86 @@ app.put('/api/pedidos/:id/foto-coleta', authEntregador, async (req, res) => {
   res.json({ success: true, message: 'Foto da coleta registrada! Vá entregar.' });
 });
 
+async function registrarRepasseFinanceiro(tx, pedido, entregadorId = null) {
+  if (Number(pedido.repasse_processado)) return false;
+  const valorLoja = Number(pedido.valor_liquido_loja || 0);
+  const comissaoLoja = Number(pedido.valor_comissao_loja || 0);
+  const valorMotoboy = entregadorId ? Number(pedido.valor_motoboy || 0) : 0;
+  const valorPlataformaEntrega = Number(pedido.valor_plataforma || 0);
+
+  await tx.run('INSERT INTO saldo_lojas (loja_id) VALUES (?) ON CONFLICT (loja_id) DO NOTHING', [pedido.loja_id]);
+  await tx.run(`UPDATE saldo_lojas SET saldo = saldo + ?, total_recebido = total_recebido + ?
+    WHERE loja_id = ?`, [valorLoja, valorLoja, pedido.loja_id]);
+  await tx.run(`INSERT INTO movimentacoes_lojas
+    (loja_id, pedido_id, descricao, valor_bruto, valor_comissao, valor_liquido, tipo)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`, [pedido.loja_id, pedido.id, `Venda do pedido #${pedido.id}`,
+    Number(pedido.total_produtos || 0), comissaoLoja, valorLoja, 'credito']);
+
+  if (comissaoLoja > 0) {
+    await tx.run('INSERT INTO saldo_plataforma (descricao, valor, tipo, pedido_id) VALUES (?, ?, ?, ?)',
+      [`Comissão de 10% da loja — pedido #${pedido.id}`, comissaoLoja, 'credito', pedido.id]);
+  }
+  if (valorPlataformaEntrega > 0) {
+    await tx.run('INSERT INTO saldo_plataforma (descricao, valor, tipo, pedido_id) VALUES (?, ?, ?, ?)',
+      [`Receita da entrega — pedido #${pedido.id}`, valorPlataformaEntrega, 'credito', pedido.id]);
+  }
+
+  if (entregadorId) {
+    await tx.run('INSERT INTO saldo_entregadores (entregador_id, saldo) VALUES (?, 0) ON CONFLICT (entregador_id) DO NOTHING', [entregadorId]);
+    await tx.run(`UPDATE saldo_entregadores SET saldo = saldo + ?, total_ganho = total_ganho + ?
+      WHERE entregador_id = ?`, [valorMotoboy, valorMotoboy, entregadorId]);
+    await tx.run('UPDATE entregadores SET total_entregas = total_entregas + 1, disponivel = 1 WHERE id = ?', [entregadorId]);
+  }
+
+  await tx.run('UPDATE pedidos SET repasse_processado = 1 WHERE id = ?', [pedido.id]);
+  return true;
+}
+
 // ENTREGADOR: Finalizar entrega (foto + crédito automático)
 app.put('/api/pedidos/:id/finalizar', authEntregador, async (req, res) => {
-  const pedido = await dbGet('SELECT * FROM pedidos WHERE id = ?', [req.params.id]);
-  if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado' });
-  if (pedido.entregador_id != req.usuario.id) return res.status(403).json({ error: 'Permissão negada' });
-  if (pedido.status !== 'saiu_entrega') return res.status(400).json({ error: 'Pedido não está em entrega' });
-  
   const { foto } = req.body;
   if (!foto) return res.status(400).json({ error: 'Tire a foto da entrega para finalizar' });
-  
-  // Finalizar pedido
-  await dbRun("UPDATE pedidos SET foto_entrega = ?, status = 'entregue', data_entrega = CURRENT_TIMESTAMP WHERE id = ?", [foto, req.params.id]);
-  
-  // CRÉDITO AUTOMÁTICO: motoboy recebe a parte dele
-  const valor_motoboy = pedido.valor_motoboy || 0;
-  const valor_plataforma = pedido.valor_plataforma || 0;
-  
-  // Garantir que existe registro de saldo
-  await dbRun('INSERT INTO saldo_entregadores (entregador_id, saldo) VALUES (?, 0) ON CONFLICT (entregador_id) DO NOTHING', [req.usuario.id]);
-  
-  // Creditar pro motoboy
-  await dbRun('UPDATE saldo_entregadores SET saldo = saldo + ?, total_ganho = total_ganho + ? WHERE entregador_id = ?', 
-    [valor_motoboy, valor_motoboy, req.usuario.id]);
-  
-  // Creditar pra plataforma (Adalto)
-  await dbRun('INSERT INTO saldo_plataforma (descricao, valor, tipo, pedido_id) VALUES (?, ?, ?, ?)', 
-    [`Comissão entrega #${pedido.id}`, valor_plataforma, 'credito', pedido.id]);
-  
-  // Atualizar entregas do motoboy
-  await dbRun('UPDATE entregadores SET total_entregas = total_entregas + 1, disponivel = 1 WHERE id = ?', [req.usuario.id]);
-  
-  res.json({ 
-    success: true, 
-    message: '✅ Entrega finalizada!',
-    creditado: valor_motoboy,
-    valor_plataforma: valor_plataforma
-  });
+  try {
+    const resultado = await dbTransaction(async tx => {
+      const pedido = await tx.get('SELECT * FROM pedidos WHERE id = ? FOR UPDATE', [req.params.id]);
+      if (!pedido) throw Object.assign(new Error('Pedido não encontrado'), { status: 404 });
+      if (pedido.entregador_id != req.usuario.id) throw Object.assign(new Error('Permissão negada'), { status: 403 });
+      if (pedido.status !== 'saiu_entrega') throw Object.assign(new Error('Pedido não está em entrega'), { status: 400 });
+      await tx.run("UPDATE pedidos SET foto_entrega = ?, status = 'entregue', data_entrega = CURRENT_TIMESTAMP WHERE id = ?", [foto, pedido.id]);
+      await registrarRepasseFinanceiro(tx, pedido, req.usuario.id);
+      return { creditado: Number(pedido.valor_motoboy || 0), valorPlataforma: Number(pedido.valor_plataforma || 0) + Number(pedido.valor_comissao_loja || 0) };
+    });
+    res.json({ success: true, message: '✅ Entrega finalizada!', creditado: resultado.creditado, valor_plataforma: resultado.valorPlataforma });
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    console.error('Erro ao finalizar entrega:', error);
+    res.status(500).json({ error: 'Não foi possível finalizar a entrega' });
+  }
+});
+
+// Loja conclui retirada ou entrega feita por sua própria equipe.
+app.put('/api/pedidos/:id/finalizar-loja', authLojas, async (req, res) => {
+  try {
+    const resultado = await dbTransaction(async tx => {
+      const pedido = await tx.get('SELECT * FROM pedidos WHERE id = ? FOR UPDATE', [req.params.id]);
+      if (!pedido) throw Object.assign(new Error('Pedido não encontrado'), { status: 404 });
+      if (pedido.loja_id != req.usuario.id) throw Object.assign(new Error('Esse pedido não é da sua loja'), { status: 403 });
+      const retiradaValida = pedido.tipo_entrega === 'retirada' && pedido.status === 'separado';
+      const entregaLojaValida = pedido.tipo_entrega === 'entrega' && normalizarPlanoLoja(pedido.plano_loja) === 'loja' && pedido.status === 'saiu_entrega';
+      if (!retiradaValida && !entregaLojaValida) throw Object.assign(new Error('Pedido ainda não pode ser concluído pela loja'), { status: 400 });
+      if (retiradaValida && String(req.body.codigo_retirada || '').trim().toUpperCase() !== String(pedido.codigo_retirada || '').toUpperCase()) {
+        throw Object.assign(new Error('Código de retirada incorreto'), { status: 400 });
+      }
+      await tx.run("UPDATE pedidos SET status = 'entregue', data_entrega = CURRENT_TIMESTAMP WHERE id = ?", [pedido.id]);
+      await registrarRepasseFinanceiro(tx, pedido, null);
+      return { valorLoja: Number(pedido.valor_liquido_loja || 0) };
+    });
+    res.json({ success: true, message: 'Pedido concluído e repasse calculado', valor_loja: resultado.valorLoja });
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    console.error('Erro ao concluir pedido da loja:', error);
+    res.status(500).json({ error: 'Não foi possível concluir o pedido' });
+  }
 });
 
 // Loja responsável ou administrador atualiza o status do pedido.
@@ -537,6 +699,12 @@ app.put('/api/pedidos/:id/status', async (req, res) => {
     }
     if (usuario.tipo === 'loja' && !['confirmado', 'cancelado'].includes(status)) {
       return res.status(403).json({ error: 'A loja não pode aplicar esse status' });
+    }
+    if (usuario.tipo === 'loja' && status === 'confirmado' && pedido.status !== 'aguardando') {
+      return res.status(400).json({ error: 'Este pedido não está aguardando confirmação da loja' });
+    }
+    if (usuario.tipo === 'loja' && status === 'cancelado' && !['aguardando', 'confirmado'].includes(pedido.status)) {
+      return res.status(400).json({ error: 'Este pedido não pode mais ser cancelado pela loja' });
     }
 
     const updates = []; const params = [];
@@ -649,6 +817,7 @@ app.post('/api/admin/limpar-dados-teste', authAdmin, async (req, res) => {
   try {
     for (const sql of [
       'DELETE FROM avaliacoes', 'DELETE FROM saldo_plataforma',
+      'DELETE FROM movimentacoes_lojas', 'DELETE FROM saldo_lojas',
       'DELETE FROM saldo_entregadores', 'DELETE FROM pedidos',
       'DELETE FROM produtos', 'DELETE FROM lojas',
       'DELETE FROM clientes', 'DELETE FROM entregadores'
@@ -703,8 +872,17 @@ app.get('/api/admin/financeiro', authAdmin, async (req, res) => {
     FROM saldo_entregadores se 
     JOIN entregadores e ON se.entregador_id = e.id 
     ORDER BY se.saldo DESC`);
+  const saldoLojas = await dbAll(`SELECT sl.loja_id,
+    sl.saldo::double precision AS saldo,
+    sl.total_recebido::double precision AS total_recebido,
+    sl.total_sacado::double precision AS total_sacado,
+    l.nome as loja_nome, l.email, l.chave_pix, l.plano,
+    l.comissao_percentual::double precision AS comissao_percentual
+    FROM saldo_lojas sl
+    JOIN lojas l ON sl.loja_id = l.id
+    ORDER BY sl.saldo DESC`);
   const totalPlataforma = await dbGet('SELECT COALESCE(SUM(valor), 0) as total FROM saldo_plataforma WHERE tipo = ?', ['credito']);
-  res.json({ saldoPlataforma, saldoEntregadores, totalPlataforma: totalPlataforma?.total || 0 });
+  res.json({ saldoPlataforma, saldoEntregadores, saldoLojas, totalPlataforma: totalPlataforma?.total || 0 });
 });
 
 // ============ SERVE FRONTEND ============

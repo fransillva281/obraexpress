@@ -39,6 +39,12 @@ body{background:var(--bg);color:var(--texto)}
 .tab.active{background:var(--laranja);color:var(--branco)}
 .empty-state{text-align:center;padding:40px 20px;color:var(--texto-sec)}
 .toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:#37474F;color:var(--branco);padding:12px 24px;border-radius:12px;font-size:14px;z-index:999;display:none}
+.category-options{display:grid;grid-template-columns:1fr 1fr;gap:8px;background:var(--branco);padding:10px;border:2px solid var(--borda);border-radius:10px;max-height:230px;overflow:auto}
+.category-option{display:flex;align-items:center;gap:7px;font-size:12px;padding:7px;background:var(--bg);border-radius:8px;cursor:pointer}
+.category-option input{width:auto;margin:0}
+.sound-alert{margin:10px 16px 0;width:calc(100% - 32px);padding:10px;border:1px solid #FFB74D;border-radius:10px;background:#FFF3E0;color:var(--laranja-escuro);font-weight:700;cursor:pointer}
+.finance-box{margin-top:8px;padding:10px;background:#F1F8E9;border-radius:9px;font-size:12px;line-height:1.7}
+.finance-box strong{color:var(--verde)}
 </style>
 </head>
 <body>
@@ -60,7 +66,8 @@ body{background:var(--bg);color:var(--texto)}
       <div class="form-group"><label>Endereço</label><input type="text" id="cad-endereco" placeholder="Rua, número"></div>
       <div class="form-group"><label>Bairro</label><input type="text" id="cad-bairro" placeholder="Centro"></div>
       <div class="form-group"><label>Chave Pix (para receber)</label><input type="text" id="cad-pix" placeholder="CPF, email, telefone ou chave aleatória"></div>
-      <div class="form-group"><label>Categorias (separadas por vírgula)</label><input type="text" id="cad-categorias" placeholder="Hidráulica, Elétrica, Acabamento"></div>
+      <div class="form-group"><label>Categorias atendidas pela loja</label><div id="cad-categorias-list" class="category-options">Carregando categorias...</div></div>
+      <div class="form-group"><label>Plano da loja — comissão inicial de 10%</label><select id="cad-plano"><option value="entrega_obraexpress">🛵 Entrega ObraExpress — nossos entregadores</option><option value="loja">🏪 Plano Loja — a própria loja entrega</option></select></div>
       <div class="form-group"><label>Taxa de entrega por KM (R$)</label><input type="number" id="cad-taxa" value="2" step="0.5"></div>
       <div class="form-group"><label>Tempo de preparo</label><input type="text" id="cad-tempo" value="30-60 min" placeholder="Ex: 30-60 min"></div>
       <div class="form-group"><label>Descrição</label><textarea id="cad-descricao" placeholder="Fale sobre sua loja..."></textarea></div>
@@ -73,8 +80,9 @@ body{background:var(--bg);color:var(--texto)}
 
 <div id="page-dashboard" class="pages" style="display:none">
   <div class="header"><h1>🏪 <span id="loja-header-name">Painel</span></h1><div class="sub">Gerenciar loja e pedidos</div></div>
+  <button id="alerta-som-loja" class="sound-alert" onclick="alternarAlertasLoja()">🔕 Ativar alertas sonoros</button>
   <div class="tabs" style="margin-top:12px">
-    <button class="tab active" onclick="switchDashboardTab('pedidos',this)">📋 Pedidos</button>
+    <button id="tab-pedidos-loja" class="tab active" onclick="switchDashboardTab('pedidos',this)">📋 Pedidos</button>
     <button class="tab" onclick="switchDashboardTab('produtos',this)">📦 Produtos</button>
     <button class="tab" onclick="switchDashboardTab('perfil',this)">⚙️ Perfil</button>
   </div>
@@ -87,14 +95,62 @@ body{background:var(--bg);color:var(--texto)}
 const API = '';
 let token = localStorage.getItem('loja_token');
 let loja = JSON.parse(localStorage.getItem('loja') || 'null');
+let categoriasDisponiveis = [];
+let pedidosConhecidosLoja = null;
+let monitorPedidosLoja = null;
+let audioLoja = null;
+let alertasLojaAtivos = localStorage.getItem('alertas_som_loja') === '1';
 
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',3000);}
 async function api(path,opts={}){const h={'Content-Type':'application/json'};if(token)h['Authorization']='Bearer '+token;try{const r=await fetch(API+path,{...opts,headers:h});return await r.json()}catch(e){return{error:e.message}}}
 
-function showCadastro(){document.getElementById('login-form').style.display='none';document.getElementById('cadastro-form').style.display='block'}
+function showCadastro(){document.getElementById('login-form').style.display='none';document.getElementById('cadastro-form').style.display='block';carregarCategoriasDisponiveis()}
 function showLogin(){document.getElementById('login-form').style.display='block';document.getElementById('cadastro-form').style.display='none'}
 
+async function carregarCategoriasDisponiveis(){
+  if(!categoriasDisponiveis.length){
+    const r=await api('/api/categorias');
+    categoriasDisponiveis=r.categorias||[];
+  }
+  const el=document.getElementById('cad-categorias-list');
+  if(el)el.innerHTML=categoriasDisponiveis.map(c=>`<label class="category-option"><input type="checkbox" value="${c.nome}"><span>${c.icone||'📦'} ${c.nome}</span></label>`).join('');
+}
+
+function categoriasSelecionadasCadastro(){
+  return [...document.querySelectorAll('#cad-categorias-list input:checked')].map(i=>i.value).join(', ');
+}
+
+function prepararAudioLoja(){
+  if(!audioLoja){const AudioCtx=window.AudioContext||window.webkitAudioContext;if(AudioCtx)audioLoja=new AudioCtx();}
+  if(audioLoja?.state==='suspended')audioLoja.resume();
+}
+
+function tocarAlertaLoja(){
+  if(!alertasLojaAtivos)return;
+  prepararAudioLoja();
+  if(!audioLoja)return;
+  [0,0.22].forEach((atraso,indice)=>{
+    const osc=audioLoja.createOscillator();const gain=audioLoja.createGain();
+    osc.frequency.value=indice===0?880:1040;gain.gain.value=0.12;
+    osc.connect(gain);gain.connect(audioLoja.destination);
+    const inicio=audioLoja.currentTime+atraso;osc.start(inicio);osc.stop(inicio+0.14);
+  });
+}
+
+function atualizarBotaoSomLoja(){
+  const b=document.getElementById('alerta-som-loja');
+  if(b)b.textContent=alertasLojaAtivos?'🔔 Alertas sonoros ativados':'🔕 Ativar alertas sonoros';
+}
+
+function alternarAlertasLoja(){
+  alertasLojaAtivos=!alertasLojaAtivos;
+  localStorage.setItem('alertas_som_loja',alertasLojaAtivos?'1':'0');
+  atualizarBotaoSomLoja();
+  if(alertasLojaAtivos){prepararAudioLoja();tocarAlertaLoja();toast('🔔 Você ouvirá um bip quando chegar pedido novo.');}
+}
+
 async function loginLoja(){
+  if(alertasLojaAtivos)prepararAudioLoja();
   const email=document.getElementById('login-email').value;
   const senha=document.getElementById('login-senha').value;
   if(!email||!senha)return toast('Preencha email e senha');
@@ -114,13 +170,15 @@ async function cadastroLoja(){
     endereco:document.getElementById('cad-endereco').value,
     bairro:document.getElementById('cad-bairro').value,
     chave_pix:document.getElementById('cad-pix').value,
-    categorias:document.getElementById('cad-categorias').value,
+    categorias:categoriasSelecionadasCadastro(),
+    plano:document.getElementById('cad-plano').value,
     taxa_entrega_km:parseFloat(document.getElementById('cad-taxa').value)||2,
     tempo_entrega_min:document.getElementById('cad-tempo').value,
     descricao:document.getElementById('cad-descricao').value,
     senha:document.getElementById('cad-senha').value
   };
   if(!d.nome||!d.email||!d.senha)return toast('Preencha nome, email e senha');
+  if(!d.categorias)return toast('Escolha pelo menos uma categoria');
   const r=await api('/api/lojas/cadastro',{method:'POST',body:JSON.stringify(d)});
   if(r.error)return toast(r.error);
   token=r.token;loja=r.loja;
@@ -134,7 +192,15 @@ function entrarDashboard(){
   document.getElementById('page-login').classList.remove('active');
   document.getElementById('page-dashboard').style.display='block';
   document.getElementById('page-dashboard').classList.add('active');
-  carregarPedidosLoja();
+  atualizarBotaoSomLoja();
+  iniciarMonitorPedidosLoja();
+}
+
+async function iniciarMonitorPedidosLoja(){
+  if(monitorPedidosLoja)clearInterval(monitorPedidosLoja);
+  pedidosConhecidosLoja=null;
+  await carregarPedidosLoja();
+  monitorPedidosLoja=setInterval(carregarPedidosLoja,15000);
 }
 
 function switchDashboardTab(tab,btn){
@@ -149,6 +215,15 @@ function switchDashboardTab(tab,btn){
 async function carregarPedidosLoja(){
   const el=document.getElementById('dash-pedidos');
   const r=await api('/api/pedidos/loja/'+loja.id);
+  if(r.error)return;
+  const aguardando=(r.pedidos||[]).filter(p=>p.status==='aguardando');
+  const idsAtuais=new Set(aguardando.map(p=>p.id));
+  if(pedidosConhecidosLoja&&[...idsAtuais].some(id=>!pedidosConhecidosLoja.has(id))){
+    tocarAlertaLoja();toast('🔔 Novo pedido recebido!');
+  }
+  pedidosConhecidosLoja=idsAtuais;
+  const tab=document.getElementById('tab-pedidos-loja');
+  if(tab)tab.textContent=`📋 Pedidos${aguardando.length?` (${aguardando.length})`:''}`;
   if(!r.pedidos||r.pedidos.length===0){el.innerHTML=`<div class="empty-state"><div class="icon" style="font-size:48px">📋</div><h3>Nenhum pedido ainda</h3></div>`;return}
   const statusLabel={'aguardando':'⏳ Aguardando','confirmado':'✅ Confirmado','separado':'📦 Separado','saiu_entrega':'🛵 Saiu','entregue':'📦 Entregue','cancelado':'❌ Cancelado'};
   const statusColors={'aguardando':'#F57F17','confirmado':'#1565C0','separado':'#2E7D32','saiu_entrega':'#7B1FA2','entregue':'#2E7D32','cancelado':'#C62828'};
@@ -161,6 +236,11 @@ async function carregarPedidosLoja(){
       <div class="meta">💳 ${p.forma_pagamento==='pix'?'📱 Pix':p.forma_pagamento==='dinheiro'?'💵 Dinheiro':'💳 Cartão'}</div>
       <div class="meta">${p.data_pedido}</div>
       <div class="total">R$ ${p.total_final.toFixed(2)}</div>
+      <div class="finance-box">
+        Produtos: R$ ${Number(p.total_produtos||0).toFixed(2)}<br>
+        Comissão ObraExpress (${Number(p.comissao_loja_percentual||10).toFixed(0)}%): - R$ ${Number(p.valor_comissao_loja||0).toFixed(2)}<br>
+        <strong>Líquido da loja: R$ ${Number(p.valor_liquido_loja||0).toFixed(2)}</strong>
+      </div>
       
       ${p.separado_por ? `<div class="meta" style="color:var(--azul);font-weight:600">👤 Separado por: ${p.separado_por}</div>` : ''}
       ${p.entregador_nome ? `<div class="meta" style="color:#7B1FA2">🛵 Entregador: ${p.entregador_nome}</div>` : ''}
@@ -182,8 +262,20 @@ async function carregarPedidosLoja(){
         </div>
       `:''}
       
-      ${p.status==='separado'?`
-        <div class="meta" style="color:var(--azul)">🕐 Aguardando motoboy aceitar...</div>
+      ${p.status==='separado' && p.tipo_entrega==='retirada'?`
+        <div style="margin-top:8px">
+          <div class="form-group" style="padding:0;margin-bottom:4px"><label>Código mostrado pelo cliente</label><input id="codigo-retirada-${p.id}" maxlength="6" placeholder="Ex: A1B2C3" style="text-transform:uppercase"></div>
+          <button class="btn btn-sm btn-success" onclick="finalizarPedidoLoja(${p.id},true)">✅ Confirmar retirada</button>
+        </div>
+      `:''}
+      ${p.status==='separado' && p.tipo_entrega==='entrega' && p.plano_loja==='loja'?`
+        <button class="btn btn-sm btn-success" onclick="iniciarEntregaLoja(${p.id})">🚚 Saiu para entrega da loja</button>
+      `:''}
+      ${p.status==='separado' && p.tipo_entrega==='entrega' && p.plano_loja!=='loja'?`
+        <div class="meta" style="color:var(--azul)">🕐 Aguardando entregador ObraExpress aceitar...</div>
+      `:''}
+      ${p.status==='saiu_entrega' && p.plano_loja==='loja'?`
+        <button class="btn btn-sm btn-success" onclick="finalizarPedidoLoja(${p.id},false)">✅ Marcar como entregue</button>
       `:''}
       
       ${p.codigo_retirada?`<div style="margin-top:6px;font-size:14px;font-weight:700;color:var(--laranja)">🔑 Código retirada: ${p.codigo_retirada}</div>`:''}
@@ -210,8 +302,24 @@ async function separarPedido(id){
   carregarPedidosLoja();
 }
 
+async function iniciarEntregaLoja(id){
+  const r=await api('/api/pedidos/'+id+'/iniciar-entrega-loja',{method:'PUT'});
+  if(r.error)return toast(r.error);
+  toast('🚚 Pedido saiu para entrega pela loja');carregarPedidosLoja();
+}
+
+async function finalizarPedidoLoja(id,retirada){
+  const codigo=retirada?(document.getElementById('codigo-retirada-'+id)?.value||''):'';
+  if(retirada&&!codigo)return toast('Digite o código mostrado pelo cliente');
+  const r=await api('/api/pedidos/'+id+'/finalizar-loja',{method:'PUT',body:JSON.stringify({codigo_retirada:codigo})});
+  if(r.error)return toast(r.error);
+  toast('✅ Pedido concluído. Líquido da loja: R$ '+Number(r.valor_loja||0).toFixed(2));
+  carregarPedidosLoja();
+}
+
 async function carregarProdutosLoja(){
   const el=document.getElementById('dash-produtos');
+  await carregarCategoriasDisponiveis();
   const r=await api('/api/lojas/'+loja.id);
   if(!r.produtos||r.produtos.length===0){
     el.innerHTML=`
@@ -234,13 +342,14 @@ async function carregarProdutosLoja(){
 }
 
 function adicionarProdutoForm(){
+  const opcoes=categoriasDisponiveis.map(c=>`<option value="${c.nome}">${c.icone||'📦'} ${c.nome}</option>`).join('');
   return `
     <div class="card">
       <h3 style="margin-bottom:8px">➕ Adicionar Produto</h3>
       <div class="form-group" style="padding:0;margin-bottom:8px"><label>Nome</label><input type="text" id="novo-produto-nome" placeholder="Conexão 25mm"></div>
       <div class="form-group" style="padding:0;margin-bottom:8px"><label>Preço (R$)</label><input type="number" id="novo-produto-preco" step="0.01" placeholder="15.90"></div>
       <div class="form-group" style="padding:0;margin-bottom:8px"><label>Marca (opcional)</label><input type="text" id="novo-produto-marca" placeholder="Tigre/Amanco"></div>
-      <div class="form-group" style="padding:0;margin-bottom:8px"><label>Categoria</label><input type="text" id="novo-produto-categoria" placeholder="Hidráulica"></div>
+      <div class="form-group" style="padding:0;margin-bottom:8px"><label>Categoria</label><select id="novo-produto-categoria"><option value="">Escolha uma categoria</option>${opcoes}</select></div>
       <div class="form-group" style="padding:0;margin-bottom:8px"><label>Imagem do produto (opcional)</label><input type="file" id="novo-produto-foto" accept="image/jpeg,image/png,image/webp" onchange="previsualizarProduto(event)" style="width:100%;padding:8px"><div id="preview-produto" style="margin-top:8px"></div></div>
       <button class="btn btn-primary btn-sm" style="padding:10px;margin:0" onclick="adicionarProduto()">➕ Adicionar</button>
     </div>
@@ -265,7 +374,7 @@ async function adicionarProduto(){
     categoria:document.getElementById('novo-produto-categoria').value,
     foto:fotoProdutoSelecionada || null
   };
-  if(!d.nome||!d.preco)return toast('Nome e preço são obrigatórios');
+  if(!d.nome||!d.preco||!d.categoria)return toast('Nome, preço e categoria são obrigatórios');
   const r=await api('/api/produtos',{method:'POST',body:JSON.stringify({...d,loja_id:loja.id})});
   if(r.error)return toast(r.error);
   if(!r.produto)return toast('O produto não foi confirmado no banco.');
@@ -279,20 +388,37 @@ async function removerProduto(id){
   if(r.error)return toast(r.error);toast('Produto removido');carregarProdutosLoja();
 }
 
-function carregarPerfilLoja(){
+async function carregarPerfilLoja(){
+  const dados=await api('/api/lojas/'+loja.id);
+  if(dados.loja){loja={...loja,...dados.loja};localStorage.setItem('loja',JSON.stringify(loja));}
   const el=document.getElementById('dash-perfil');
+  const nomePlano=loja.plano==='loja'?'Plano Loja — entrega própria':'Entrega ObraExpress';
   el.innerHTML=`
     <div class="card">
       <h3>🏪 ${loja.nome}</h3>
       <div class="meta">📧 ${loja.email}</div>
       <div class="meta">🛵 R$ ${loja.taxa_entrega_km}/km</div>
+      <div class="meta">📄 ${nomePlano}</div>
+      <div class="meta">💼 Comissão inicial: ${Number(loja.comissao_percentual||10).toFixed(0)}%</div>
+      <div class="form-group" style="padding:0;margin-top:10px"><label>Plano para os próximos pedidos</label><select id="perfil-plano"><option value="entrega_obraexpress" ${loja.plano!=='loja'?'selected':''}>🛵 Entrega ObraExpress</option><option value="loja" ${loja.plano==='loja'?'selected':''}>🏪 A própria loja entrega</option></select></div>
+      <button class="btn btn-primary btn-sm" onclick="alterarPlanoLoja()">Salvar plano</button>
     </div>
-    <button class="btn" onclick="excluirMinhaConta()" style="color:#c62828;border:1px solid #c62828;margin-bottom:16px">🗑️ Excluir minha conta e produtos</button>
+    <div class="card" id="financeiro-loja"><h3>💰 Financeiro</h3><div class="meta">Carregando...</div></div>
     <div class="card">
-      <h3>📊 Estatísticas</h3
+      <h3>📊 Estatísticas</h3>
       <div class="meta" id="stats-loja">Carregando...</div>
     </div>
+    <button class="btn" onclick="excluirMinhaConta()" style="color:#c62828;border:1px solid #c62828;margin-bottom:16px">🗑️ Excluir minha conta e produtos</button>
   `;
+  api('/api/lojas/'+loja.id+'/financeiro').then(r=>{
+    if(!r.saldo)return;
+    document.getElementById('financeiro-loja').innerHTML=`
+      <h3>💰 Financeiro <small style="color:var(--texto-sec)">(calculado)</small></h3>
+      <div style="font-size:26px;font-weight:800;color:var(--verde)">R$ ${Number(r.saldo.saldo||0).toFixed(2)}</div>
+      <div class="meta">Total líquido calculado: R$ ${Number(r.saldo.total_recebido||0).toFixed(2)}</div>
+      <div style="margin-top:10px">${(r.movimentacoes||[]).slice(0,8).map(m=>`<div class="finance-box"><strong>Pedido #${m.pedido_id}</strong><br>Venda: R$ ${Number(m.valor_bruto).toFixed(2)} • Comissão: R$ ${Number(m.valor_comissao).toFixed(2)}<br>Líquido: R$ ${Number(m.valor_liquido).toFixed(2)}</div>`).join('')||'<div class="meta">Nenhuma venda concluída.</div>'}</div>
+      <div class="meta" style="margin-top:8px">O repasse bancário real será ativado com a integração de pagamentos.</div>`;
+  });
   api('/api/pedidos/loja/'+loja.id).then(r=>{
     if(r.pedidos){
       const total=r.pedidos.length;
@@ -307,6 +433,15 @@ function carregarPerfilLoja(){
   });
 }
 
+async function alterarPlanoLoja(){
+  const plano=document.getElementById('perfil-plano').value;
+  const r=await api('/api/lojas/'+loja.id,{method:'PUT',body:JSON.stringify({plano})});
+  if(r.error)return toast(r.error);
+  loja.plano=plano;loja.comissao_percentual=10;
+  localStorage.setItem('loja',JSON.stringify(loja));
+  toast('Plano atualizado para os próximos pedidos');carregarPerfilLoja();
+}
+
 async function excluirMinhaConta(){
   if(!confirm('Excluir a loja, produtos e pedidos? Esta ação não pode ser desfeita.'))return;
   const r=await api('/api/lojas/'+loja.id,{method:'DELETE'});
@@ -316,6 +451,7 @@ async function excluirMinhaConta(){
 }
 
 // Init
+carregarCategoriasDisponiveis();
 if(loja){
   document.getElementById('loja-header-name').textContent=loja.nome;
   entrarDashboard();

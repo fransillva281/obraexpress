@@ -26,10 +26,11 @@ body{background:var(--bg);color:var(--texto);overflow-x:hidden}
 .search-box .icon{font-size:20px;color:var(--texto-sec)}
 .cat-scroll{overflow-x:auto;padding:0 16px;margin:12px 0;white-space:nowrap;-webkit-overflow-scrolling:touch}
 .cat-scroll::-webkit-scrollbar{display:none}
-.cat-item{display:inline-flex;flex-direction:column;align-items:center;margin-right:12px;padding:12px 16px;background:var(--branco);border-radius:16px;box-shadow:0 1px 3px rgba(0,0,0,.06);cursor:pointer;min-width:80px;transition:.2s}
+.cat-item{display:inline-flex;vertical-align:top;flex-direction:column;align-items:center;justify-content:center;margin-right:10px;padding:12px 10px;background:var(--branco);border:2px solid transparent;border-radius:16px;box-shadow:0 2px 8px rgba(0,0,0,.07);cursor:pointer;width:104px;min-height:94px;white-space:normal;transition:.2s}
+.cat-item:hover{border-color:var(--laranja);transform:translateY(-2px)}
 .cat-item:active{transform:scale(.95)}
-.cat-item .icon{font-size:28px;margin-bottom:4px}
-.cat-item .name{font-size:12px;font-weight:600;color:var(--texto-sec)}
+.cat-item .icon{font-size:30px;margin-bottom:6px}
+.cat-item .name{font-size:11px;line-height:1.2;font-weight:700;color:var(--cinza);text-align:center}
 .store-card{background:var(--branco);border-radius:16px;margin:8px 16px;padding:16px;display:flex;gap:12px;box-shadow:0 1px 3px rgba(0,0,0,.06);cursor:pointer;transition:.2s}
 .store-card:active{transform:scale(.98)}
 .store-logo{width:56px;height:56px;border-radius:12px;background:var(--laranja-claro);display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0}
@@ -47,6 +48,11 @@ body{background:var(--bg);color:var(--texto);overflow-x:hidden}
 .product-info .preco{font-size:16px;font-weight:700;color:var(--laranja);margin-bottom:8px}
 .product-info .btn-add{width:100%;padding:8px;background:var(--laranja);color:var(--branco);border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;transition:.2s}
 .product-info .btn-add:active{transform:scale(.95)}
+.comparison-header{background:var(--branco);margin:10px 16px 12px;padding:14px;border-radius:14px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.comparison-header h3{font-size:16px;margin-bottom:3px}
+.comparison-header p{font-size:12px;color:var(--texto-sec)}
+.product-card.best-price{border:2px solid var(--verde);position:relative}
+.best-price-badge{display:inline-block;background:#E8F5E9;color:var(--verde);font-size:10px;font-weight:800;padding:4px 7px;border-radius:8px;margin-bottom:6px}
 .btn{display:block;width:100%;padding:14px;border:none;border-radius:12px;font-size:16px;font-weight:600;cursor:pointer;transition:.2s;text-align:center;text-decoration:none}
 .btn-primary{background:var(--laranja);color:var(--branco)}
 .btn-primary:active{transform:scale(.98)}
@@ -80,6 +86,7 @@ body{background:var(--bg);color:var(--texto);overflow-x:hidden}
 .order-card:active{transform:scale(.98)}
 .order-card .status{display:inline-block;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;margin-bottom:8px}
 .status-aguardando{background:#FFF3E0;color:#E65100}
+.status-aguardando_confirmacao{background:#FFF8E1;color:#F57F17}
 .status-confirmado{background:#E8F5E9;color:#2E7D32}
 .status-separado{background:#E3F2FD;color:#1565C0}
 .status-saiu_entrega{background:#F3E5F5;color:#7B1FA2}
@@ -143,6 +150,7 @@ body{background:var(--bg);color:var(--texto);overflow-x:hidden}
     <span class="icon">🔍</span>
     <input type="text" id="search-input-page" placeholder="Cimento, tijolo, areia..." oninput="searchProducts()" autofocus>
   </div>
+  <div id="search-context"></div>
   <div id="search-results"></div>
 </div>
 
@@ -316,6 +324,7 @@ const API = '';
 let usuario = JSON.parse(localStorage.getItem('obraexpress_cliente'));
 let cart = JSON.parse(localStorage.getItem('cart') || '[]');
 let lojaAtual = null;
+let categoriaAtiva = '';
 
 // ============ API ============
 async function api(path, opts = {}) {
@@ -389,9 +398,15 @@ async function renderLojas() {
 }
 
 function buscarCategoria(cat) {
-  document.getElementById('search-input-page').value = cat;
+  categoriaAtiva = cat;
+  document.getElementById('search-input-page').value = '';
   navigate('busca');
-  searchProducts();
+  carregarProdutosCategoria(cat);
+}
+
+async function carregarProdutosCategoria(cat) {
+  const r = await api('/api/produtos?categoria=' + encodeURIComponent(cat) + '&ordem=menor_preco');
+  renderComparacaoProdutos(r.produtos || [], cat);
 }
 
 async function abrirLoja(id) {
@@ -431,21 +446,38 @@ async function abrirLoja(id) {
 // ============ BUSCA ============
 async function searchProducts() {
   const q = document.getElementById('search-input-page').value;
-  if (!q) { document.getElementById('search-results').innerHTML = ''; return; }
-  const r = await api('/api/produtos?busca=' + encodeURIComponent(q));
-  if (!r.produtos || r.produtos.length === 0) {
-    document.getElementById('search-results').innerHTML = `<div class="empty-state"><div class="icon">🔍</div><h3>Nada encontrado</h3><p>Tente outro termo</p></div>`;
+  categoriaAtiva = '';
+  if (!q) {
+    document.getElementById('search-context').innerHTML = '';
+    document.getElementById('search-results').innerHTML = '';
     return;
   }
-  document.getElementById('search-results').innerHTML = `
-    <div class="section-title">${r.produtos.length} resultado(s)</div>
-    <div class="product-grid">${r.produtos.map(p => `
-      <div class="product-card">
+  const r = await api('/api/produtos?busca=' + encodeURIComponent(q) + '&ordem=menor_preco');
+  renderComparacaoProdutos(r.produtos || [], `Busca: ${q}`);
+}
+
+function renderComparacaoProdutos(produtos, titulo) {
+  const context = document.getElementById('search-context');
+  const results = document.getElementById('search-results');
+  context.innerHTML = `
+    <div class="comparison-header">
+      <h3>📊 ${titulo}</h3>
+      <p>${produtos.length} produto(s) de todas as lojas • menor preço primeiro</p>
+    </div>`;
+  if (produtos.length === 0) {
+    results.innerHTML = `<div class="empty-state"><div class="icon">🔍</div><h3>Nenhum produto nessa categoria</h3><p>As lojas ainda não cadastraram produtos aqui</p></div>`;
+    return;
+  }
+  results.innerHTML = `
+    <div class="product-grid">${produtos.map((p, index) => `
+      <div class="product-card ${index === 0 ? 'best-price' : ''}">
         <div class="product-img">${p.foto ? `<img src="${p.foto}" alt="${p.nome}" style="width:100%;height:100%;object-fit:cover;border-radius:10px">` : '📦'}</div>
         <div class="product-info">
+          ${index === 0 ? '<span class="best-price-badge">✓ MENOR PREÇO DA LISTA</span>' : ''}
           <h4>${p.nome}</h4>
-          <div class="loja-nome">${p.loja_nome || ''}</div>
-          <div class="preco">R$ ${p.preco.toFixed(2)}</div>
+          <div class="loja-nome">🏪 ${p.loja_nome || ''}${p.loja_bairro ? ` • ${p.loja_bairro}` : ''}</div>
+          <div class="loja-nome">${p.marca || ''}</div>
+          <div class="preco">R$ ${Number(p.preco).toFixed(2)}</div>
           <button class="btn-add" onclick="addToCart(${p.id},'${p.nome.replace(/'/g,"\\'")}',${p.preco},${p.loja_id},'${(p.loja_nome||'').replace(/'/g,"\\'")}')">+ Adicionar</button>
         </div>
       </div>
@@ -563,7 +595,9 @@ async function finalizarPedido() {
   // Salvar pedido_id pra confirmar depois
   window.pedidoConfirmarId = r.pedido_id;
   window.pedidoConfirmarData = {
-    subtotal, frete, total: subtotal + frete,
+    subtotal: Number(r.total_produtos),
+    frete: Number(r.taxa_entrega),
+    total: Number(r.total_final),
     tipo, pagamento, loja: cart[0].loja_nome
   };
 
@@ -634,7 +668,8 @@ async function renderPedidos() {
     return;
   }
   const statusLabel = {
-    'aguardando':'⏳ Aguardando confirmação',
+    'aguardando_confirmacao':'⏳ Confirme o pedido',
+    'aguardando':'⏳ Aguardando a loja',
     'confirmado':'✅ Confirmado',
     'separado':'📦 Sendo separado',
     'em_coleta':'📍 Indo buscar na loja',
@@ -663,7 +698,8 @@ async function verDetalhePedido(id) {
   if (!p) return toast('Pedido não encontrado');
   
   const statusLabel = {
-    'aguardando':'⏳ Aguardando confirmação',
+    'aguardando_confirmacao':'⏳ Confirme o pedido',
+    'aguardando':'⏳ Aguardando a loja',
     'confirmado':'✅ Pedido confirmado pela loja',
     'separado':'📦 Loja separou o pedido',
     'saiu_entrega':'🛵 Motoboy a caminho','em_coleta':'📍 Indo buscar na loja',
@@ -671,7 +707,8 @@ async function verDetalhePedido(id) {
     'cancelado':'❌ Cancelado'
   };
   const statusDesc = {
-    'aguardando':'Aguardando você confirmar o valor total.',
+    'aguardando_confirmacao':'Aguardando você confirmar o valor total.',
+    'aguardando':'A loja recebeu o pedido e precisa confirmar.',
     'confirmado':'A loja recebeu seu pedido e está preparando.',
     'separado':'O pedido foi separado e está aguardando um motoboy.',
     'saiu_entrega':'O motoboy já pegou o pedido e está a caminho!',

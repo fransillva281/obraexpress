@@ -53,6 +53,38 @@ async function dbGet(sql, params = []) {
   return result.rows[0];
 }
 
+function transactionHelpers(client) {
+  return {
+    async run(sql, params = []) {
+      const result = await client.query(buildRunSql(sql), params);
+      return { lastID: result.rows[0]?.id, changes: result.rowCount };
+    },
+    async all(sql, params = []) {
+      const result = await client.query(toPostgresSql(sql), params);
+      return result.rows;
+    },
+    async get(sql, params = []) {
+      const result = await client.query(toPostgresSql(sql), params);
+      return result.rows[0];
+    }
+  };
+}
+
+async function dbTransaction(work) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await work(transactionHelpers(client));
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function initializeDatabase() {
   const schemaPath = path.join(__dirname, 'db', 'schema.sql');
   const schema = fs.readFileSync(schemaPath, 'utf8');
@@ -92,6 +124,7 @@ module.exports = {
   dbAll,
   dbGet,
   dbRun,
+  dbTransaction,
   getDatabaseHealth,
   isUniqueViolation
 };

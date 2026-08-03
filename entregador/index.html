@@ -48,6 +48,7 @@ body{background:var(--bg);color:var(--texto)}
 .saldo-card .valor{font-size:36px;font-weight:800;margin:8px 0}
 .saldo-card .label{font-size:12px;opacity:.8}
 .toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:#37474F;color:var(--branco);padding:12px 24px;border-radius:12px;font-size:14px;z-index:999;display:none}
+.sound-alert{margin:10px 16px 0;width:calc(100% - 32px);padding:10px;border:1px solid #FFB74D;border-radius:10px;background:#FFF3E0;color:var(--laranja-escuro);font-weight:700;cursor:pointer}
 </style>
 </head>
 <body>
@@ -79,12 +80,12 @@ body{background:var(--bg);color:var(--texto)}
 
 <div id="page-dashboard" class="pages" style="display:none">
   <div class="header"><h1>🛵 <span id="entregador-header-name">Painel</span></h1><div class="sub">Suas entregas e saldo</div></div>
-  
+  <button id="alerta-som-entregador" class="sound-alert" onclick="alternarAlertasEntregador()">🔕 Ativar alertas sonoros</button>
   <div id="saldo-container"></div>
   <div id="gps-status" class="card" style="border-left:4px solid var(--azul);display:none"></div>
   
   <div class="tabs">
-    <button class="tab active" onclick="switchTab('disponiveis',this)">🆕 Disponíveis</button>
+    <button id="tab-disponiveis-entregador" class="tab active" onclick="switchTab('disponiveis',this)">🆕 Disponíveis</button>
     <button class="tab" onclick="switchTab('minhas-entregas',this)">🛵 Minhas</button>
     <button class="tab" onclick="switchTab('perfil',this)">👤 Perfil</button>
   </div>
@@ -99,6 +100,39 @@ let token = localStorage.getItem('entregador_token');
 let entregador = JSON.parse(localStorage.getItem('entregador') || 'null');
 let gpsWatchId = null;
 let ultimaLocalizacao = null;
+let entregasConhecidas = null;
+let monitorEntregas = null;
+let audioEntregador = null;
+let alertasEntregadorAtivos = localStorage.getItem('alertas_som_entregador') === '1';
+
+function prepararAudioEntregador(){
+  if(!audioEntregador){const AudioCtx=window.AudioContext||window.webkitAudioContext;if(AudioCtx)audioEntregador=new AudioCtx();}
+  if(audioEntregador?.state==='suspended')audioEntregador.resume();
+}
+
+function tocarAlertaEntregador(){
+  if(!alertasEntregadorAtivos)return;
+  prepararAudioEntregador();
+  if(!audioEntregador)return;
+  [0,0.22].forEach((atraso,indice)=>{
+    const osc=audioEntregador.createOscillator();const gain=audioEntregador.createGain();
+    osc.frequency.value=indice===0?740:980;gain.gain.value=0.12;
+    osc.connect(gain);gain.connect(audioEntregador.destination);
+    const inicio=audioEntregador.currentTime+atraso;osc.start(inicio);osc.stop(inicio+0.14);
+  });
+}
+
+function atualizarBotaoSomEntregador(){
+  const b=document.getElementById('alerta-som-entregador');
+  if(b)b.textContent=alertasEntregadorAtivos?'🔔 Alertas sonoros ativados':'🔕 Ativar alertas sonoros';
+}
+
+function alternarAlertasEntregador(){
+  alertasEntregadorAtivos=!alertasEntregadorAtivos;
+  localStorage.setItem('alertas_som_entregador',alertasEntregadorAtivos?'1':'0');
+  atualizarBotaoSomEntregador();
+  if(alertasEntregadorAtivos){prepararAudioEntregador();tocarAlertaEntregador();toast('🔔 Você ouvirá um bip quando aparecer entrega nova.');}
+}
 
 function atualizarGpsStatus(html, mostrar=true){
   const el=document.getElementById('gps-status');
@@ -134,6 +168,7 @@ function showCadastro(){document.getElementById('login-form').style.display='non
 function showLogin(){document.getElementById('login-form').style.display='block';document.getElementById('cadastro-form').style.display='none'}
 
 async function loginEntregador(){
+  if(alertasEntregadorAtivos)prepararAudioEntregador();
   const email=document.getElementById('login-email').value;
   const senha=document.getElementById('login-senha').value;
   if(!email||!senha)return toast('Preencha email e senha');
@@ -172,8 +207,16 @@ function entrarDashboard(){
   document.getElementById('page-login').classList.remove('active');
   document.getElementById('page-dashboard').style.display='block';
   document.getElementById('page-dashboard').classList.add('active');
+  atualizarBotaoSomEntregador();
   carregarSaldo();
-  carregarDisponiveis();
+  iniciarMonitorEntregas();
+}
+
+async function iniciarMonitorEntregas(){
+  if(monitorEntregas)clearInterval(monitorEntregas);
+  entregasConhecidas=null;
+  await carregarDisponiveis();
+  monitorEntregas=setInterval(carregarDisponiveis,15000);
 }
 
 function switchTab(tab,btn){
@@ -205,11 +248,20 @@ async function carregarSaldo(){
 async function carregarDisponiveis(){
   const el=document.getElementById('tab-disponiveis');
   const r=await api('/api/pedidos/disponiveis');
-  if(!r.pedidos||r.pedidos.length===0){
+  if(r.error)return;
+  const pedidos=r.pedidos||[];
+  const idsAtuais=new Set(pedidos.map(p=>p.id));
+  if(entregasConhecidas&&[...idsAtuais].some(id=>!entregasConhecidas.has(id))){
+    tocarAlertaEntregador();toast('🔔 Nova entrega disponível!');
+  }
+  entregasConhecidas=idsAtuais;
+  const tab=document.getElementById('tab-disponiveis-entregador');
+  if(tab)tab.textContent=`🆕 Disponíveis${pedidos.length?` (${pedidos.length})`:''}`;
+  if(pedidos.length===0){
     el.innerHTML=`<div class="empty-state"><div class="icon" style="font-size:48px">🆕</div><h3>Nenhum pedido disponível</h3><p>Assim que uma loja liberar, aparece aqui</p></div>`;
     return;
   }
-  el.innerHTML=r.pedidos.map(p=>`
+  el.innerHTML=pedidos.map(p=>`
     <div class="order-item">
       <div style="text-align:center">
         <span class="status" style="background:#E8F5E9;color:var(--verde)">📦 Pronto para coleta</span>
@@ -380,6 +432,8 @@ async function excluirMinhaConta(){
 }
 
 function sair(){
+  if(monitorEntregas){clearInterval(monitorEntregas);monitorEntregas=null;}
+  pararGPS();
   localStorage.removeItem('entregador_token');
   localStorage.removeItem('entregador');
   token=null;entregador=null;
