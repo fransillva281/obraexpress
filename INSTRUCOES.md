@@ -17,13 +17,12 @@ ObraExpress é um marketplace de materiais de construção (tipo iFood, mas pra 
 
 ## 📱 COMO AS PESSOAS VÃO USAR?
 
-### 🅰️ PWA - Instala direto do navegador (JÁ FUNCIONA)
+### 🅰️ PWA - Instala direto do navegador
 O sistema já vem com **PWA (Progressive Web App)**. Isso significa que:
 - A pessoa acessa o link pelo celular
 - Aparece a opção "Instalar aplicativo" 
 - O app fica na tela inicial **igual um app baixado da loja**
 - Funciona offline, rápido, usa câmera, GPS
-- **Custo: R$ 0**
 
 ### 🅱️ Google Play Store (Próximo passo)
 - **Custo:** Taxa única de US$ 25 (~R$ 140)
@@ -37,37 +36,14 @@ O sistema já vem com **PWA (Progressive Web App)**. Isso significa que:
 
 ---
 
-## 💰 RESUMO DE CUSTOS
+## 🚀 PUBLICAÇÃO NO RENDER
 
-| Etapa | O que precisa | Custo |
-|------|--------------|-------|
-| 1️⃣ **Testar agora** | Já está feito ✅ | **R$ 0** |
-| 2️⃣ **Colocar online** | Railway.app grátis | **R$ 0** |
-| 3️⃣ **PWA instalável** | Já implementado ✅ | **R$ 0** |
-| 4️⃣ **Google Play** | Taxa da Google | **~R$ 140 (único)** |
-| 5️⃣ **App Store** | Taxa anual Apple | **~R$ 550/ano** |
-| 6️⃣ **Domínio próprio** | Registro.br | **~R$ 40/ano** |
+O projeto usa um Web Service Node.js e um banco PostgreSQL persistente. Consulte
+o arquivo `DEPLOY_RENDER.md` antes de publicar uma atualização. A variável
+`DATABASE_URL` é obrigatória e deve usar, de preferência, a Internal Database
+URL do PostgreSQL no Render.
 
----
-
-## 🚀 COMO COLOCAR NO AR
-
-### PASSO 1: Criar conta no Railway
-1. Acesse railway.app
-2. Clique em "Start a New Project"
-3. Faça login com GitHub ou Google
-4. Conta grátis criada
-
-### PASSO 2: Fazer upload do código
-1. No Railway, clique "New Project" → "Deploy from repo"
-2. Ou use o botão "Upload" para subir a pasta do projeto
-3. Configure a variável: PORT=3000
-
-### PASSO 3: Seu site está no ar!
-- O Railway dá um link tipo: obraexpress.up.railway.app
-- Pronto pra usar!
-
-### PASSO 4: Instalar no celular
+Para instalar no celular:
 - Cliente: acessa o link → abre no Chrome → "Adicionar à tela inicial"
 - Loja: acessa o link + /loja → instala
 - Entregador: acessa o link + /entregador → instala
@@ -88,7 +64,7 @@ O sistema já vem com **PWA (Progressive Web App)**. Isso significa que:
 
 ## 🔧 PRÓXIMOS PASSOS
 
-1. ✅ **Colocar no ar** (Railway grátis)
+1. ✅ **Manter online no Render com PostgreSQL**
 2. ✅ **PWA instalável** (já incluso)
 3. 🔜 **Tráfego pago** (Google Ads, Facebook)
 4. 🔜 **Parceria com lojas** de material

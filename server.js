@@ -1,14 +1,29 @@
 const express = require('express');
-const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const path = require('path');
-const fs = require('fs');
+const {
+  databaseReady,
+  dbAll,
+  dbGet,
+  dbRun,
+  getDatabaseHealth,
+  isUniqueViolation
+} = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const JWT_SECRET = 'obraexpress_secret_key_2026';
+
+function requireEnvironment(name) {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} não configurada no ambiente`);
+  return value;
+}
+
+const JWT_SECRET = requireEnvironment('JWT_SECRET');
+const ADMIN_EMAIL = requireEnvironment('ADMIN_EMAIL');
+const ADMIN_PASSWORD = requireEnvironment('ADMIN_PASSWORD');
 
 // Configurações da plataforma
 const PLATAFORMA = {
@@ -38,266 +53,17 @@ app.get('/admin/*', (req, res) => {
   res.sendFile(path.join(__dirname, 'admin', 'index.html'));
 });
 
-// Database setup: PostgreSQL no Render; SQLite apenas como fallback local.
-const usePostgres = Boolean(process.env.DATABASE_URL);
-let db, pgPool;
-if (usePostgres) {
-  const { Pool } = require('pg');
-  pgPool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
-}
-function pgSql(sql) {
-  let i = 0;
-  return sql.replace(/\?/g, () => '$' + (++i))
-    .replace(/date\(data_pedido\) = date\('now', '-3 hours'\)/gi, "data_pedido::date = (CURRENT_TIMESTAMP - INTERVAL '3 hours')::date");
-}
-const dbRun = (sql, params = []) => {
-  if (usePostgres) {
-    let q = pgSql(sql);
-    const ignore = /INSERT OR IGNORE/i.test(q);
-    q = q.replace(/INSERT OR IGNORE INTO/gi, 'INSERT INTO');
-    if (ignore) q += ' ON CONFLICT DO NOTHING';
-    else if (/^\s*INSERT\s+INTO/i.test(q) && !/RETURNING/i.test(q)) q += ' RETURNING id';
-    return pgPool.query(q, params).then(r => ({ lastID: r.rows[0]?.id, changes: r.rowCount }));
-  }
-  return new Promise((resolve, reject) => db.run(sql, params, function(err) { if (err) reject(err); else resolve(this); }));
-};
-const dbAll = (sql, params = []) => usePostgres ? pgPool.query(pgSql(sql), params).then(r => r.rows) : new Promise((resolve, reject) => db.all(sql, params, (err, rows) => err ? reject(err) : resolve(rows)));
-const dbGet = (sql, params = []) => usePostgres ? pgPool.query(pgSql(sql), params).then(r => r.rows[0]) : new Promise((resolve, reject) => db.get(sql, params, (err, row) => err ? reject(err) : resolve(row)));
-const pgTables = ["CREATE TABLE IF NOT EXISTS lojas (\n      id SERIAL PRIMARY KEY,\n      nome TEXT NOT NULL,\n      cnpj TEXT UNIQUE,\n      email TEXT UNIQUE NOT NULL,\n      senha TEXT NOT NULL,\n      telefone TEXT,\n      whatsapp TEXT,\n      chave_pix TEXT,\n      logo TEXT,\n      endereco TEXT,\n      bairro TEXT,\n      cidade TEXT DEFAULT 'São Luís',\n      estado TEXT DEFAULT 'MA',\n      latitude DOUBLE PRECISION,\n      longitude DOUBLE PRECISION,\n      descricao TEXT,\n      categorias TEXT,\n      taxa_entrega_km DOUBLE PRECISION DEFAULT 2.00,\n      entrega_gratis_ate DOUBLE PRECISION DEFAULT 0,\n      tempo_entrega_min TEXT DEFAULT '30-60 min',\n      aberto INTEGER DEFAULT 1,\n      plano TEXT DEFAULT 'comissao',\n      data_cadastro TEXT DEFAULT ((CURRENT_TIMESTAMP - INTERVAL '3 hours'))\n    )", "CREATE TABLE IF NOT EXISTS produtos (\n      id SERIAL PRIMARY KEY,\n      loja_id INTEGER NOT NULL,\n      nome TEXT NOT NULL,\n      descricao TEXT,\n      preco DOUBLE PRECISION NOT NULL,\n      foto TEXT,\n      categoria TEXT,\n      marca TEXT,\n      unidade TEXT DEFAULT 'un',\n      estoque INTEGER DEFAULT 999,\n      destaque INTEGER DEFAULT 0,\n      ativo INTEGER DEFAULT 1,\n      data_cadastro TEXT DEFAULT ((CURRENT_TIMESTAMP - INTERVAL '3 hours')),\n      FOREIGN KEY (loja_id) REFERENCES lojas(id) ON DELETE CASCADE\n    )", "CREATE TABLE IF NOT EXISTS clientes (\n      id SERIAL PRIMARY KEY,\n      nome TEXT NOT NULL,\n      email TEXT UNIQUE NOT NULL,\n      senha TEXT NOT NULL,\n      telefone TEXT,\n      endereco_padrao TEXT,\n      bairro TEXT,\n      cidade TEXT DEFAULT 'São Luís',\n      estado TEXT DEFAULT 'MA',\n      latitude DOUBLE PRECISION,\n      longitude DOUBLE PRECISION,\n      data_cadastro TEXT DEFAULT ((CURRENT_TIMESTAMP - INTERVAL '3 hours'))\n    )", "CREATE TABLE IF NOT EXISTS pedidos (\n      id SERIAL PRIMARY KEY,\n      cliente_id INTEGER NOT NULL,\n      loja_id INTEGER NOT NULL,\n      entregador_id INTEGER,\n      itens TEXT NOT NULL,\n      total_produtos DOUBLE PRECISION NOT NULL DEFAULT 0,\n      taxa_entrega DOUBLE PRECISION DEFAULT 0,\n      total_final DOUBLE PRECISION NOT NULL DEFAULT 0,\n      tipo_entrega TEXT DEFAULT 'entrega',\n      endereco_entrega TEXT,\n      bairro_entrega TEXT,\n      latitude_entrega DOUBLE PRECISION,\n      longitude_entrega DOUBLE PRECISION,\n      distancia_km DOUBLE PRECISION DEFAULT 0,\n      forma_pagamento TEXT DEFAULT 'pix',\n      observacao TEXT,\n      status TEXT DEFAULT 'aguardando',\n      codigo_retirada TEXT,\n      data_pedido TEXT DEFAULT ((CURRENT_TIMESTAMP - INTERVAL '3 hours')),\n      data_confirmacao TEXT,\n      data_entrega TEXT,\n      FOREIGN KEY (cliente_id) REFERENCES clientes(id),\n      FOREIGN KEY (loja_id) REFERENCES lojas(id)\n    )", "CREATE TABLE IF NOT EXISTS entregadores (\n      id SERIAL PRIMARY KEY,\n      nome TEXT NOT NULL,\n      cpf TEXT UNIQUE,\n      email TEXT UNIQUE NOT NULL,\n      senha TEXT NOT NULL,\n      telefone TEXT,\n      veiculo TEXT,\n      placa TEXT,\n      foto TEXT,\n      chave_pix TEXT,\n      disponivel INTEGER DEFAULT 1,\n      latitude DOUBLE PRECISION,\n      longitude DOUBLE PRECISION,\n      avaliacao DOUBLE PRECISION DEFAULT 5.0,\n      total_entregas INTEGER DEFAULT 0,\n      data_cadastro TEXT DEFAULT ((CURRENT_TIMESTAMP - INTERVAL '3 hours'))\n    )", "CREATE TABLE IF NOT EXISTS saldo_entregadores (\n      id SERIAL PRIMARY KEY,\n      entregador_id INTEGER UNIQUE NOT NULL,\n      saldo DOUBLE PRECISION DEFAULT 0,\n      total_ganho DOUBLE PRECISION DEFAULT 0,\n      total_sacado DOUBLE PRECISION DEFAULT 0,\n      FOREIGN KEY (entregador_id) REFERENCES entregadores(id) ON DELETE CASCADE\n    )", "CREATE TABLE IF NOT EXISTS saldo_plataforma (\n      id SERIAL PRIMARY KEY,\n      descricao TEXT,\n      valor DOUBLE PRECISION NOT NULL,\n      tipo TEXT DEFAULT 'credito',\n      pedido_id INTEGER,\n      data TEXT DEFAULT ((CURRENT_TIMESTAMP - INTERVAL '3 hours'))\n    )", "CREATE TABLE IF NOT EXISTS avaliacoes (\n      id SERIAL PRIMARY KEY,\n      pedido_id INTEGER NOT NULL,\n      cliente_id INTEGER NOT NULL,\n      loja_id INTEGER,\n      entregador_id INTEGER,\n      nota INTEGER NOT NULL CHECK(nota >= 1 AND nota <= 5),\n      comentario TEXT,\n      data TEXT DEFAULT ((CURRENT_TIMESTAMP - INTERVAL '3 hours')),\n      FOREIGN KEY (pedido_id) REFERENCES pedidos(id),\n      FOREIGN KEY (cliente_id) REFERENCES clientes(id)\n    )", "CREATE TABLE IF NOT EXISTS categorias (\n      id SERIAL PRIMARY KEY,\n      nome TEXT NOT NULL,\n      icone TEXT,\n      ordem INTEGER DEFAULT 0\n    )"];
-async function initPostgres() {
-  // A tabela de entregadores vem antes de pedidos para respeitar a referência.
-  const ordered = [...pgTables.filter(x => /CREATE TABLE IF NOT EXISTS entregadores/.test(x)), ...pgTables.filter(x => !/CREATE TABLE IF NOT EXISTS entregadores/.test(x))];
-  for (const sql of ordered) await pgPool.query(sql);
-  const extra = [['separado_por','TEXT'],['foto_coleta','TEXT'],['foto_entrega','TEXT'],['cliente_confirmou','INTEGER DEFAULT 0'],['valor_motoboy','DOUBLE PRECISION DEFAULT 0'],['valor_plataforma','DOUBLE PRECISION DEFAULT 0'],['pix_pago','INTEGER DEFAULT 0'],['data_separado','TEXT'],['data_coleta','TEXT'],['data_saida','TEXT']];
-  for (const [name,type] of extra) await pgPool.query(`ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS ${name} ${type}`);
-  const count = await dbGet('SELECT COUNT(*) as count FROM categorias');
-  if (Number(count.count) === 0) {
-    const cats = [['Hidráulica','🔧',1],['Elétrica','⚡',2],['Conexões','🔩',3],['Ferragens','🔨',4],['Acabamento','🏠',5],['Pisos e Revestimentos','🧱',6],['Tintas','🎨',7],['Ferramentas','🛠️',8],['Segurança','🪖',9],['Hidráulica','🚿',10]];
-    for (const c of cats) await dbRun('INSERT INTO categorias (nome, icone, ordem) VALUES (?, ?, ?)', c);
-  }
-}
-const databaseReady = usePostgres ? initPostgres() : Promise.resolve();
-if (!usePostgres) {
-  const sqlite3 = require('sqlite3').verbose();
-  db = new sqlite3.Database('obraexpress.db');
-  // ============ CREATE TABLES ============
-db.serialize(() => {
-  db.run(`
-    CREATE TABLE IF NOT EXISTS lojas (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      nome TEXT NOT NULL,
-      cnpj TEXT UNIQUE,
-      email TEXT UNIQUE NOT NULL,
-      senha TEXT NOT NULL,
-      telefone TEXT,
-      whatsapp TEXT,
-      chave_pix TEXT,
-      logo TEXT,
-      endereco TEXT,
-      bairro TEXT,
-      cidade TEXT DEFAULT 'São Luís',
-      estado TEXT DEFAULT 'MA',
-      latitude REAL,
-      longitude REAL,
-      descricao TEXT,
-      categorias TEXT,
-      taxa_entrega_km REAL DEFAULT 2.00,
-      entrega_gratis_ate REAL DEFAULT 0,
-      tempo_entrega_min TEXT DEFAULT '30-60 min',
-      aberto INTEGER DEFAULT 1,
-      plano TEXT DEFAULT 'comissao',
-      data_cadastro TEXT DEFAULT (datetime('now', '-3 hours'))
-    )`);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS produtos (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      loja_id INTEGER NOT NULL,
-      nome TEXT NOT NULL,
-      descricao TEXT,
-      preco REAL NOT NULL,
-      foto TEXT,
-      categoria TEXT,
-      marca TEXT,
-      unidade TEXT DEFAULT 'un',
-      estoque INTEGER DEFAULT 999,
-      destaque INTEGER DEFAULT 0,
-      ativo INTEGER DEFAULT 1,
-      data_cadastro TEXT DEFAULT (datetime('now', '-3 hours')),
-      FOREIGN KEY (loja_id) REFERENCES lojas(id) ON DELETE CASCADE
-    )`);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS clientes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      nome TEXT NOT NULL,
-      email TEXT UNIQUE NOT NULL,
-      senha TEXT NOT NULL,
-      telefone TEXT,
-      endereco_padrao TEXT,
-      bairro TEXT,
-      cidade TEXT DEFAULT 'São Luís',
-      estado TEXT DEFAULT 'MA',
-      latitude REAL,
-      longitude REAL,
-      data_cadastro TEXT DEFAULT (datetime('now', '-3 hours'))
-    )`);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS pedidos (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      cliente_id INTEGER NOT NULL,
-      loja_id INTEGER NOT NULL,
-      entregador_id INTEGER,
-      itens TEXT NOT NULL,
-      total_produtos REAL NOT NULL DEFAULT 0,
-      taxa_entrega REAL DEFAULT 0,
-      total_final REAL NOT NULL DEFAULT 0,
-      tipo_entrega TEXT DEFAULT 'entrega',
-      endereco_entrega TEXT,
-      bairro_entrega TEXT,
-      latitude_entrega REAL,
-      longitude_entrega REAL,
-      distancia_km REAL DEFAULT 0,
-      forma_pagamento TEXT DEFAULT 'pix',
-      observacao TEXT,
-      status TEXT DEFAULT 'aguardando',
-      codigo_retirada TEXT,
-      data_pedido TEXT DEFAULT (datetime('now', '-3 hours')),
-      data_confirmacao TEXT,
-      data_entrega TEXT,
-      FOREIGN KEY (cliente_id) REFERENCES clientes(id),
-      FOREIGN KEY (loja_id) REFERENCES lojas(id),
-      FOREIGN KEY (entregador_id) REFERENCES entregadores(id)
-    )`);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS entregadores (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      nome TEXT NOT NULL,
-      cpf TEXT UNIQUE,
-      email TEXT UNIQUE NOT NULL,
-      senha TEXT NOT NULL,
-      telefone TEXT,
-      veiculo TEXT,
-      placa TEXT,
-      foto TEXT,
-      chave_pix TEXT,
-      disponivel INTEGER DEFAULT 1,
-      latitude REAL,
-      longitude REAL,
-      avaliacao REAL DEFAULT 5.0,
-      total_entregas INTEGER DEFAULT 0,
-      data_cadastro TEXT DEFAULT (datetime('now', '-3 hours'))
-    )`);
-
-  // Nova tabela: saldo dos entregadores
-  db.run(`
-    CREATE TABLE IF NOT EXISTS saldo_entregadores (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      entregador_id INTEGER UNIQUE NOT NULL,
-      saldo REAL DEFAULT 0,
-      total_ganho REAL DEFAULT 0,
-      total_sacado REAL DEFAULT 0,
-      FOREIGN KEY (entregador_id) REFERENCES entregadores(id) ON DELETE CASCADE
-    )`);
-
-  // Nova tabela: saldo da plataforma (Adalto)
-  db.run(`
-    CREATE TABLE IF NOT EXISTS saldo_plataforma (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      descricao TEXT,
-      valor REAL NOT NULL,
-      tipo TEXT DEFAULT 'credito',
-      pedido_id INTEGER,
-      data TEXT DEFAULT (datetime('now', '-3 hours'))
-    )`);
-
-  // Nova tabela: avaliações
-  db.run(`
-    CREATE TABLE IF NOT EXISTS avaliacoes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      pedido_id INTEGER NOT NULL,
-      cliente_id INTEGER NOT NULL,
-      loja_id INTEGER,
-      entregador_id INTEGER,
-      nota INTEGER NOT NULL CHECK(nota >= 1 AND nota <= 5),
-      comentario TEXT,
-      data TEXT DEFAULT (datetime('now', '-3 hours')),
-      FOREIGN KEY (pedido_id) REFERENCES pedidos(id),
-      FOREIGN KEY (cliente_id) REFERENCES clientes(id)
-    )`);
-
-  // Adicionar novas colunas na tabela pedidos se não existirem
-  db.all("PRAGMA table_info(pedidos)", (err, cols) => {
-    if (err) return;
-    const colNames = cols.map(c => c.name);
-    
-    if (!colNames.includes('separado_por')) {
-      db.run("ALTER TABLE pedidos ADD COLUMN separado_por TEXT");
-    }
-    if (!colNames.includes('foto_coleta')) {
-      db.run("ALTER TABLE pedidos ADD COLUMN foto_coleta TEXT");
-    }
-    if (!colNames.includes('foto_entrega')) {
-      db.run("ALTER TABLE pedidos ADD COLUMN foto_entrega TEXT");
-    }
-    if (!colNames.includes('cliente_confirmou')) {
-      db.run("ALTER TABLE pedidos ADD COLUMN cliente_confirmou INTEGER DEFAULT 0");
-    }
-    if (!colNames.includes('valor_motoboy')) {
-      db.run("ALTER TABLE pedidos ADD COLUMN valor_motoboy REAL DEFAULT 0");
-    }
-    if (!colNames.includes('valor_plataforma')) {
-      db.run("ALTER TABLE pedidos ADD COLUMN valor_plataforma REAL DEFAULT 0");
-    }
-    if (!colNames.includes('pix_pago')) {
-      db.run("ALTER TABLE pedidos ADD COLUMN pix_pago INTEGER DEFAULT 0");
-    }
-    if (!colNames.includes('data_separado')) {
-      db.run("ALTER TABLE pedidos ADD COLUMN data_separado TEXT");
-    }
-    if (!colNames.includes('data_coleta')) {
-      db.run("ALTER TABLE pedidos ADD COLUMN data_coleta TEXT");
-    }
-  });
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS categorias (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      nome TEXT NOT NULL,
-      icone TEXT,
-      ordem INTEGER DEFAULT 0
-    )`);
-
-  // Insert default categories if none exist
-  db.get('SELECT COUNT(*) as count FROM categorias', (err, row) => {
-    if (row && row.count === 0) {
-      const cats = [
-        ['Hidráulica', '🔧', 1],
-        ['Elétrica', '⚡', 2],
-        ['Conexões', '🔩', 3],
-        ['Ferragens', '🔨', 4],
-        ['Acabamento', '🏠', 5],
-        ['Pisos e Revestimentos', '🧱', 6],
-        ['Tintas', '🎨', 7],
-        ['Ferramentas', '🛠️', 8],
-        ['Segurança', '🪖', 9],
-        ['Hidráulica', '🚿', 10]
-      ];
-      const stmt = db.prepare('INSERT INTO categorias (nome, icone, ordem) VALUES (?, ?, ?)');
-      cats.forEach(c => stmt.run(c));
-      stmt.finalize();
-    }
-  });
-});
-
-
-}
-
 databaseReady.catch(err => { console.error('Falha ao inicializar o banco:', err); process.exit(1); });
 app.use('/api', async (req, res, next) => {
   try { await databaseReady; next(); } catch { res.status(503).json({ error: 'Banco de dados indisponível' }); }
+});
+
+app.get('/api/health', async (req, res) => {
+  try {
+    res.json(await getDatabaseHealth());
+  } catch (error) {
+    res.status(503).json({ status: 'error', database: 'postgresql' });
+  }
 });
 
 // ============ MIDDLEWARE ============
@@ -348,11 +114,12 @@ app.post('/api/lojas/cadastro', async (req, res) => {
     const hash = bcrypt.hashSync(senha, 10);
     const result = await dbRun('INSERT INTO lojas (nome, email, senha, telefone, endereco, bairro, latitude, longitude, descricao, categorias, taxa_entrega_km, chave_pix) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', 
       [nome, email, hash, telefone, endereco, bairro, latitude, longitude, descricao, categorias, taxa_entrega_km || 2.00, chave_pix || null]);
-    const token = jwt.sign({ id: result.lastID, tipo: 'loja' }, JWT_SECRET);
+    const token = jwt.sign({ id: result.lastID, tipo: 'loja' }, JWT_SECRET, { expiresIn: '7d' });
     res.json({ success: true, id: result.lastID, token, loja: { id: result.lastID, nome, email } });
   } catch (e) {
-    if (e.message.includes('UNIQUE')) return res.status(400).json({ error: 'Email já cadastrado' });
-    res.status(500).json({ error: e.message });
+    if (isUniqueViolation(e)) return res.status(400).json({ error: 'Email já cadastrado' });
+    console.error('Erro ao cadastrar loja:', e);
+    res.status(500).json({ error: 'Não foi possível cadastrar a loja' });
   }
 });
 
@@ -361,7 +128,7 @@ app.post('/api/lojas/login', async (req, res) => {
   const loja = await dbGet('SELECT * FROM lojas WHERE email = ?', [email]);
   if (!loja) return res.status(401).json({ error: 'Email não encontrado' });
   if (!bcrypt.compareSync(senha, loja.senha)) return res.status(401).json({ error: 'Senha incorreta' });
-  const token = jwt.sign({ id: loja.id, tipo: 'loja' }, JWT_SECRET);
+  const token = jwt.sign({ id: loja.id, tipo: 'loja' }, JWT_SECRET, { expiresIn: '7d' });
   res.json({ success: true, token, loja: { id: loja.id, nome: loja.nome, email: loja.email, logo: loja.logo, aberto: loja.aberto, taxa_entrega_km: loja.taxa_entrega_km, chave_pix: loja.chave_pix } });
 });
 
@@ -476,11 +243,12 @@ app.post('/api/clientes/cadastro', async (req, res) => {
   try {
     const hash = bcrypt.hashSync(senha, 10);
     const result = await dbRun('INSERT INTO clientes (nome, email, senha, telefone, endereco_padrao, bairro, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [nome, email, hash, telefone, endereco_padrao, bairro, latitude, longitude]);
-    const token = jwt.sign({ id: result.lastID, tipo: 'cliente' }, JWT_SECRET);
+    const token = jwt.sign({ id: result.lastID, tipo: 'cliente' }, JWT_SECRET, { expiresIn: '7d' });
     res.json({ success: true, token, cliente: { id: result.lastID, nome, email } });
   } catch (e) {
-    if (e.message.includes('UNIQUE')) return res.status(400).json({ error: 'Email já cadastrado' });
-    res.status(500).json({ error: e.message });
+    if (isUniqueViolation(e)) return res.status(400).json({ error: 'Email já cadastrado' });
+    console.error('Erro ao cadastrar cliente:', e);
+    res.status(500).json({ error: 'Não foi possível cadastrar o cliente' });
   }
 });
 
@@ -489,7 +257,7 @@ app.post('/api/clientes/login', async (req, res) => {
   const cliente = await dbGet('SELECT * FROM clientes WHERE email = ?', [email]);
   if (!cliente) return res.status(401).json({ error: 'Email não encontrado' });
   if (!bcrypt.compareSync(senha, cliente.senha)) return res.status(401).json({ error: 'Senha incorreta' });
-  const token = jwt.sign({ id: cliente.id, tipo: 'cliente' }, JWT_SECRET);
+  const token = jwt.sign({ id: cliente.id, tipo: 'cliente' }, JWT_SECRET, { expiresIn: '7d' });
   res.json({ success: true, token, cliente: { id: cliente.id, nome: cliente.nome, email: cliente.email, telefone: cliente.telefone, endereco_padrao: cliente.endereco_padrao, bairro: cliente.bairro } });
 });
 
@@ -522,13 +290,14 @@ app.post('/api/entregadores/cadastro', async (req, res) => {
   try {
     const hash = bcrypt.hashSync(senha, 10);
     const result = await dbRun('INSERT INTO entregadores (nome, cpf, email, senha, telefone, veiculo, placa, chave_pix) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [nome, cpf, email, hash, telefone, veiculo, placa, chave_pix || null]);
-    const token = jwt.sign({ id: result.lastID, tipo: 'entregador' }, JWT_SECRET);
+    const token = jwt.sign({ id: result.lastID, tipo: 'entregador' }, JWT_SECRET, { expiresIn: '7d' });
     // Criar saldo inicial
-    await dbRun('INSERT OR IGNORE INTO saldo_entregadores (entregador_id, saldo) VALUES (?, 0)', [result.lastID]);
+    await dbRun('INSERT INTO saldo_entregadores (entregador_id, saldo) VALUES (?, 0) ON CONFLICT (entregador_id) DO NOTHING', [result.lastID]);
     res.json({ success: true, token, entregador: { id: result.lastID, nome, email } });
   } catch (e) {
-    if (e.message.includes('UNIQUE')) return res.status(400).json({ error: 'CPF ou email já cadastrado' });
-    res.status(500).json({ error: e.message });
+    if (isUniqueViolation(e)) return res.status(400).json({ error: 'CPF ou email já cadastrado' });
+    console.error('Erro ao cadastrar entregador:', e);
+    res.status(500).json({ error: 'Não foi possível cadastrar o entregador' });
   }
 });
 
@@ -537,7 +306,7 @@ app.post('/api/entregadores/login', async (req, res) => {
   const entregador = await dbGet('SELECT * FROM entregadores WHERE email = ?', [email]);
   if (!entregador) return res.status(401).json({ error: 'Email não encontrado' });
   if (!bcrypt.compareSync(senha, entregador.senha)) return res.status(401).json({ error: 'Senha incorreta' });
-  const token = jwt.sign({ id: entregador.id, tipo: 'entregador' }, JWT_SECRET);
+  const token = jwt.sign({ id: entregador.id, tipo: 'entregador' }, JWT_SECRET, { expiresIn: '7d' });
   res.json({ success: true, token, entregador: { id: entregador.id, nome: entregador.nome, email: entregador.email, veiculo: entregador.veiculo, disponivel: entregador.disponivel, chave_pix: entregador.chave_pix } });
 });
 
@@ -597,7 +366,7 @@ app.put('/api/pedidos/:id/confirmar', authCliente, async (req, res) => {
   
   const { confirmou } = req.body;
   if (confirmou) {
-    await dbRun("UPDATE pedidos SET cliente_confirmou = 1, status = 'confirmado', data_confirmacao = datetime('now', '-3 hours') WHERE id = ?", [req.params.id]);
+    await dbRun("UPDATE pedidos SET cliente_confirmou = 1, status = 'confirmado', data_confirmacao = CURRENT_TIMESTAMP WHERE id = ?", [req.params.id]);
     res.json({ success: true, message: 'Pedido confirmado com sucesso! Vai para a loja.' });
   } else {
     await dbRun("UPDATE pedidos SET status = 'cancelado' WHERE id = ?", [req.params.id]);
@@ -627,7 +396,7 @@ app.put('/api/pedidos/:id/separar', authLojas, async (req, res) => {
   const { separado_por } = req.body;
   if (!separado_por) return res.status(400).json({ error: 'Informe quem separou o pedido' });
   
-  await dbRun("UPDATE pedidos SET status = 'separado', separado_por = ?, data_separado = datetime('now', '-3 hours') WHERE id = ?", [separado_por, req.params.id]);
+  await dbRun("UPDATE pedidos SET status = 'separado', separado_por = ?, data_separado = CURRENT_TIMESTAMP WHERE id = ?", [separado_por, req.params.id]);
   res.json({ success: true, message: 'Pedido separado e disponível para entrega!' });
 });
 
@@ -708,7 +477,7 @@ app.put('/api/pedidos/:id/foto-coleta', authEntregador, async (req, res) => {
   const { foto } = req.body;
   if (!foto) return res.status(400).json({ error: 'Envie a foto da coleta' });
   
-  await dbRun("UPDATE pedidos SET foto_coleta = ?, data_coleta = datetime('now', '-3 hours'), status = 'saiu_entrega' WHERE id = ?", [foto, req.params.id]);
+  await dbRun("UPDATE pedidos SET foto_coleta = ?, data_coleta = CURRENT_TIMESTAMP, status = 'saiu_entrega' WHERE id = ?", [foto, req.params.id]);
   res.json({ success: true, message: 'Foto da coleta registrada! Vá entregar.' });
 });
 
@@ -723,14 +492,14 @@ app.put('/api/pedidos/:id/finalizar', authEntregador, async (req, res) => {
   if (!foto) return res.status(400).json({ error: 'Tire a foto da entrega para finalizar' });
   
   // Finalizar pedido
-  await dbRun("UPDATE pedidos SET foto_entrega = ?, status = 'entregue', data_entrega = datetime('now', '-3 hours') WHERE id = ?", [foto, req.params.id]);
+  await dbRun("UPDATE pedidos SET foto_entrega = ?, status = 'entregue', data_entrega = CURRENT_TIMESTAMP WHERE id = ?", [foto, req.params.id]);
   
   // CRÉDITO AUTOMÁTICO: motoboy recebe a parte dele
   const valor_motoboy = pedido.valor_motoboy || 0;
   const valor_plataforma = pedido.valor_plataforma || 0;
   
   // Garantir que existe registro de saldo
-  await dbRun('INSERT OR IGNORE INTO saldo_entregadores (entregador_id, saldo) VALUES (?, 0)', [req.usuario.id]);
+  await dbRun('INSERT INTO saldo_entregadores (entregador_id, saldo) VALUES (?, 0) ON CONFLICT (entregador_id) DO NOTHING', [req.usuario.id]);
   
   // Creditar pro motoboy
   await dbRun('UPDATE saldo_entregadores SET saldo = saldo + ?, total_ganho = total_ganho + ? WHERE entregador_id = ?', 
@@ -751,7 +520,7 @@ app.put('/api/pedidos/:id/finalizar', authEntregador, async (req, res) => {
   });
 });
 
-// Admin: atualizar status manualmente
+// Loja responsável ou administrador atualiza o status do pedido.
 app.put('/api/pedidos/:id/status', async (req, res) => {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Token não fornecido' });
@@ -760,13 +529,22 @@ app.put('/api/pedidos/:id/status', async (req, res) => {
     const { status, entregador_id } = req.body;
     const pedido = await dbGet('SELECT * FROM pedidos WHERE id = ?', [req.params.id]);
     if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado' });
+    if (!['admin', 'loja'].includes(usuario.tipo)) {
+      return res.status(403).json({ error: 'Permissão negada' });
+    }
+    if (usuario.tipo === 'loja' && pedido.loja_id != usuario.id) {
+      return res.status(403).json({ error: 'Esse pedido não pertence à sua loja' });
+    }
+    if (usuario.tipo === 'loja' && !['confirmado', 'cancelado'].includes(status)) {
+      return res.status(403).json({ error: 'A loja não pode aplicar esse status' });
+    }
 
     const updates = []; const params = [];
     if (status) { updates.push('status = ?'); params.push(status); }
     if (entregador_id !== undefined) { updates.push('entregador_id = ?'); params.push(entregador_id); }
-    if (status === 'confirmado') updates.push("data_confirmacao = datetime('now', '-3 hours')");
-    if (status === 'saiu_entrega') updates.push("data_saida = datetime('now', '-3 hours')");
-    if (status === 'entregue') updates.push("data_entrega = datetime('now', '-3 hours')");
+    if (status === 'confirmado') updates.push('data_confirmacao = CURRENT_TIMESTAMP');
+    if (status === 'saiu_entrega') updates.push('data_saida = CURRENT_TIMESTAMP');
+    if (status === 'entregue') updates.push('data_entrega = CURRENT_TIMESTAMP');
     if (updates.length === 0) return res.status(400).json({ error: 'Nada para atualizar' });
     params.push(req.params.id);
     await dbRun(`UPDATE pedidos SET ${updates.join(', ')} WHERE id = ?`, params);
@@ -825,8 +603,8 @@ app.get('/api/distancia', (req, res) => {
 // ============ ADMIN API ============
 app.post('/api/admin/login', async (req, res) => {
   const { email, senha } = req.body;
-  if (email === 'admin@obraexpress.com' && senha === 'admin123') {
-    const token = jwt.sign({ id: 0, tipo: 'admin' }, JWT_SECRET);
+  if (email === ADMIN_EMAIL && senha === ADMIN_PASSWORD) {
+    const token = jwt.sign({ id: 0, tipo: 'admin' }, JWT_SECRET, { expiresIn: '8h' });
     return res.json({ success: true, token });
   }
   res.status(401).json({ error: 'Credenciais de admin inválidas' });
@@ -883,7 +661,7 @@ app.get('/api/admin/dashboard', authAdmin, async (req, res) => {
   const totalLojas = await dbGet('SELECT COUNT(*) as total FROM lojas');
   const totalEntregadores = await dbGet('SELECT COUNT(*) as total FROM entregadores');
   const totalClientes = await dbGet('SELECT COUNT(*) as total FROM clientes');
-  const pedidosHoje = await dbGet("SELECT COUNT(*) as total FROM pedidos WHERE date(data_pedido) = date('now', '-3 hours')");
+  const pedidosHoje = await dbGet("SELECT COUNT(*) as total FROM pedidos WHERE (data_pedido::timestamptz AT TIME ZONE 'America/Araguaina')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'America/Araguaina')::date");
   const pedidosPendentes = await dbGet("SELECT COUNT(*) as total FROM pedidos WHERE status NOT IN ('entregue', 'cancelado')");
   const faturamento = await dbGet('SELECT COALESCE(SUM(valor), 0) as total FROM saldo_plataforma WHERE tipo = ?', ['credito']);
   const ultimosPedidos = await dbAll(`SELECT p.id, p.status, p.total_final, p.data_pedido, 
