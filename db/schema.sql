@@ -86,6 +86,9 @@ CREATE TABLE IF NOT EXISTS pedidos (
   itens TEXT NOT NULL,
   total_produtos DOUBLE PRECISION NOT NULL DEFAULT 0,
   taxa_entrega DOUBLE PRECISION DEFAULT 0,
+  taxa_pedido_pequeno NUMERIC(12,2) DEFAULT 0,
+  pedido_minimo_aplicado NUMERIC(12,2) DEFAULT 15.00,
+  limite_pedido_pequeno_aplicado NUMERIC(12,2) DEFAULT 25.00,
   total_final DOUBLE PRECISION NOT NULL DEFAULT 0,
   tipo_entrega TEXT DEFAULT 'entrega',
   endereco_entrega TEXT,
@@ -179,14 +182,17 @@ CREATE TABLE IF NOT EXISTS categorias (
 
 CREATE TABLE IF NOT EXISTS configuracoes_plataforma (
   id INTEGER PRIMARY KEY CHECK (id = 1),
-  frete_base NUMERIC(12,2) NOT NULL DEFAULT 5.00,
-  valor_km NUMERIC(12,2) NOT NULL DEFAULT 2.00,
+  frete_base NUMERIC(12,2) NOT NULL DEFAULT 4.00,
+  valor_km NUMERIC(12,2) NOT NULL DEFAULT 1.50,
   fator_rota NUMERIC(5,2) NOT NULL DEFAULT 1.20,
-  adicional_chuva_percentual NUMERIC(5,2) NOT NULL DEFAULT 15.00,
-  adicional_pico_percentual NUMERIC(5,2) NOT NULL DEFAULT 10.00,
-  limite_adicionais_percentual NUMERIC(5,2) NOT NULL DEFAULT 25.00,
+  adicional_chuva_percentual NUMERIC(5,2) NOT NULL DEFAULT 10.00,
+  adicional_pico_percentual NUMERIC(5,2) NOT NULL DEFAULT 5.00,
+  limite_adicionais_percentual NUMERIC(5,2) NOT NULL DEFAULT 15.00,
   condicao_climatica TEXT NOT NULL DEFAULT 'normal',
   entregas_ativas INTEGER NOT NULL DEFAULT 1,
+  pedido_minimo NUMERIC(12,2) NOT NULL DEFAULT 15.00,
+  limite_pedido_pequeno NUMERIC(12,2) NOT NULL DEFAULT 25.00,
+  taxa_pedido_pequeno NUMERIC(12,2) NOT NULL DEFAULT 1.99,
   atualizado_em TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -218,7 +224,30 @@ ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS adicional_pico_percentual NUMERIC(5
 ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS valor_comissao_loja NUMERIC(12,2) DEFAULT 0;
 ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS valor_liquido_loja NUMERIC(12,2) DEFAULT 0;
 ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS repasse_processado INTEGER DEFAULT 0;
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS taxa_pedido_pequeno NUMERIC(12,2) DEFAULT 0;
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS pedido_minimo_aplicado NUMERIC(12,2) DEFAULT 15.00;
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS limite_pedido_pequeno_aplicado NUMERIC(12,2) DEFAULT 25.00;
 ALTER TABLE pedidos ALTER COLUMN status SET DEFAULT 'aguardando_confirmacao';
+
+ALTER TABLE configuracoes_plataforma ADD COLUMN IF NOT EXISTS pedido_minimo NUMERIC(12,2) NOT NULL DEFAULT 15.00;
+ALTER TABLE configuracoes_plataforma ADD COLUMN IF NOT EXISTS limite_pedido_pequeno NUMERIC(12,2) NOT NULL DEFAULT 25.00;
+ALTER TABLE configuracoes_plataforma ADD COLUMN IF NOT EXISTS taxa_pedido_pequeno NUMERIC(12,2) NOT NULL DEFAULT 1.99;
+
+-- A instalação antiga usava um frete mais alto. Apenas a configuração padrão
+-- antiga é migrada; ajustes personalizados feitos pelo administrador são preservados.
+UPDATE configuracoes_plataforma
+SET frete_base = 4.00,
+    valor_km = 1.50,
+    adicional_chuva_percentual = 10.00,
+    adicional_pico_percentual = 5.00,
+    limite_adicionais_percentual = 15.00,
+    atualizado_em = CURRENT_TIMESTAMP
+WHERE id = 1
+  AND frete_base = 5.00
+  AND valor_km = 2.00
+  AND adicional_chuva_percentual = 15.00
+  AND adicional_pico_percentual = 10.00
+  AND limite_adicionais_percentual = 25.00;
 
 ALTER TABLE lojas ALTER COLUMN plano SET DEFAULT 'entrega_obraexpress';
 UPDATE lojas SET plano = 'entrega_obraexpress' WHERE plano IS NULL OR plano NOT IN ('loja', 'entrega_obraexpress');

@@ -59,10 +59,11 @@ Para instalar no celular:
 1. ✅ **Manter online no Render com PostgreSQL**
 2. ✅ **PWA instalável** (já incluso)
 3. ✅ **GPS e frete dinâmico**
-4. 🔜 **Pix com confirmação automática**
-5. 🔜 **Parceria com lojas** de material
-6. 🔜 **Publicação em lojas de aplicativos**, usando contas elegíveis e seguindo as regras vigentes
-7. 🔜 **Notificação WhatsApp** dos pedidos
+4. ✅ **Pedido mínimo e taxa de pedido pequeno configuráveis**
+5. 🔜 **Pix com confirmação automática**
+6. 🔜 **Parceria com lojas** de material
+7. 🔜 **Publicação em lojas de aplicativos**, usando contas elegíveis e seguindo as regras vigentes
+8. 🔜 **Notificação WhatsApp** dos pedidos
 
 ---
 

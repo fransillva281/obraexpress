@@ -11,14 +11,24 @@
 
 ## Valores iniciais configurados
 
-- Valor inicial do frete: R$ 5,00.
-- Valor por km: R$ 2,00.
+- Valor inicial do frete: R$ 4,00.
+- Valor por km: R$ 1,50.
 - Fator para aproximar a distância por ruas: 1,20.
-- Chuva: 15%.
-- Horário de pico: 10%, das 11h às 14h e das 17h às 20h.
-- Limite combinado de chuva e pico: 25%.
+- Chuva: 10%.
+- Horário de pico: 5%, das 11h às 14h e das 17h às 20h.
+- Limite combinado de chuva e pico: 15%.
 
 Esses valores podem ser alterados em **Administração → Entregas**.
+
+## Pedido mínimo e pedido pequeno
+
+- Abaixo de R$ 15,00 em produtos: o pedido não pode ser criado.
+- De R$ 15,00 a R$ 24,99 em produtos: taxa de pedido pequeno de R$ 1,99.
+- A partir de R$ 25,00 em produtos: não existe taxa de pedido pequeno.
+- A taxa pertence à ObraExpress e só entra no saldo da plataforma depois que o pedido é concluído.
+- O servidor recalcula tudo usando os preços do PostgreSQL. O navegador não consegue diminuir o subtotal para contornar a regra.
+
+Os três valores também podem ser alterados em **Administração → Entregas**.
 
 ## Regra dos ganhos
 

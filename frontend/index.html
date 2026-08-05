@@ -394,6 +394,7 @@ let cadastroClienteLocalizacao = null;
 let categoriaAtiva = '';
 let categoriasCache = [];
 let searchTimer = null;
+let configuracaoCompra = {pedido_minimo:15, limite_pedido_pequeno:25, taxa_pedido_pequeno:1.99};
 
 function escaparHtml(valor) {
   return String(valor ?? '').replace(/[&<>"]/g, caractere => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[caractere]));
@@ -413,6 +414,28 @@ async function api(path, opts = {}) {
     if (data.error) return {error: data.error};
     return data;
   } catch(e) { return {error: 'Erro de conexão'}; }
+}
+
+async function carregarConfiguracaoCompra() {
+  const r = await api('/api/configuracoes-compra');
+  if (!r.error) configuracaoCompra = {
+    pedido_minimo:Number(r.pedido_minimo ?? 15),
+    limite_pedido_pequeno:Number(r.limite_pedido_pequeno ?? 25),
+    taxa_pedido_pequeno:Number(r.taxa_pedido_pequeno ?? 1.99)
+  };
+}
+
+function regraPedidoAtual(subtotal) {
+  const produtos = Math.round((Number(subtotal) + Number.EPSILON) * 100) / 100;
+  const minimo = Number(configuracaoCompra.pedido_minimo || 0);
+  const limite = Number(configuracaoCompra.limite_pedido_pequeno || 0);
+  const permitido = produtos >= minimo;
+  return {
+    permitido,
+    minimo,
+    faltante: permitido ? 0 : Math.max(0, minimo - produtos),
+    taxa: permitido && produtos < limite ? Number(configuracaoCompra.taxa_pedido_pequeno || 0) : 0
+  };
 }
 
 // ============ TOAST ============
@@ -663,6 +686,7 @@ function renderCart() {
     return;
   }
   const subtotal = cart.reduce((s,i) => s + i.preco * i.qty, 0);
+  const regra = regraPedidoAtual(subtotal);
   el.innerHTML = `
     <div style="padding:12px 16px;font-size:13px;color:var(--texto-sec)">🛒 ${cart[0].loja_nome}</div>
     ${cart.map((i, idx) => `
@@ -679,10 +703,16 @@ function renderCart() {
       </div>
     `).join('')}
     <div class="cart-resumo" style="margin:16px">
-      <div class="row"><span>Subtotal</span><span>R$ ${subtotal.toFixed(2)}</span></div>
-      <div class="row total"><span>Total</span><span>R$ ${subtotal.toFixed(2)}</span></div>
+      <div class="row"><span>Produtos</span><span>R$ ${subtotal.toFixed(2)}</span></div>
+      ${regra.taxa ? `<div class="row"><span>Taxa de pedido pequeno</span><span>R$ ${regra.taxa.toFixed(2)}</span></div>` : ''}
+      <div class="row total"><span>Total antes do frete</span><span>R$ ${(subtotal+regra.taxa).toFixed(2)}</span></div>
+      ${!regra.permitido
+        ? `<div style="margin-top:10px;padding:10px;border-radius:10px;background:#FFF3E0;color:#9A4D00">🛒 Pedido mínimo de R$ ${regra.minimo.toFixed(2)}. Adicione mais <strong>R$ ${regra.faltante.toFixed(2)}</strong>.</div>`
+        : regra.taxa
+          ? `<div style="margin-top:10px;font-size:12px;color:var(--texto-sec)">A taxa deixa de ser cobrada quando os produtos atingirem R$ ${Number(configuracaoCompra.limite_pedido_pequeno).toFixed(2)}.</div>`
+          : ''}
     </div>
-    <button class="btn btn-primary" onclick="irCheckout()" style="margin:0 16px">➡️ Continuar</button>
+    <button class="btn btn-primary" onclick="irCheckout()" style="margin:0 16px" ${regra.permitido?'':'disabled'}>➡️ Continuar</button>
   `;
 }
 
@@ -696,8 +726,11 @@ function mudarQty(idx, delta) {
 
 // ============ CHECKOUT ============
 async function irCheckout() {
-  if (!usuario) return toast('Faça login primeiro');
   if (cart.length === 0) return toast('Carrinho vazio');
+  const subtotal = cart.reduce((s,i) => s + i.preco * i.qty, 0);
+  const regra = regraPedidoAtual(subtotal);
+  if (!regra.permitido) return toast(`Adicione mais R$ ${regra.faltante.toFixed(2)} para atingir o pedido mínimo`);
+  if (!usuario) return toast('Faça login primeiro');
   cotacaoFrete = null;
   checkoutLocalizacao = null;
   const dados = await api('/api/clientes/' + usuario.id);
@@ -718,6 +751,7 @@ function renderResumoCheckout() {
   const tipo = document.getElementById('tipo-entrega').value;
   const subtotal = cart.reduce((s,i) => s + i.preco * i.qty, 0);
   const frete = tipo === 'entrega' && cotacaoFrete ? Number(cotacaoFrete.valor_frete) : 0;
+  const regra = regraPedidoAtual(subtotal);
   const detalhe = tipo === 'entrega'
     ? cotacaoFrete
       ? `<div style="font-size:12px;color:var(--texto-sec);line-height:1.5;margin:6px 0">📏 ${Number(cotacaoFrete.distancia_km).toFixed(1)} km estimados${cotacaoFrete.adicional_clima_percentual ? ` • Chuva +${cotacaoFrete.adicional_clima_percentual}%` : ''}${cotacaoFrete.adicional_pico_percentual ? ` • Horário de pico +${cotacaoFrete.adicional_pico_percentual}%` : ''}</div>`
@@ -725,9 +759,10 @@ function renderResumoCheckout() {
     : '';
   document.getElementById('checkout-resumo').innerHTML = `
     <div class="row"><span>Subtotal</span><span>R$ ${subtotal.toFixed(2)}</span></div>
+    ${regra.taxa ? `<div class="row"><span>Taxa de pedido pequeno</span><span>R$ ${regra.taxa.toFixed(2)}</span></div>` : ''}
     <div class="row"><span>🛵 Frete</span><span>${tipo==='entrega' && !cotacaoFrete ? 'A calcular' : 'R$ '+frete.toFixed(2)}</span></div>
     ${detalhe}
-    <div class="row total"><span>Total</span><span>R$ ${(subtotal+frete).toFixed(2)}</span></div>`;
+    <div class="row total"><span>Total</span><span>R$ ${(subtotal+regra.taxa+frete).toFixed(2)}</span></div>`;
 }
 
 async function calcularFreteCheckout() {
@@ -782,6 +817,8 @@ async function finalizarPedido() {
   if (tipo === 'entrega' && !cotacaoFrete && !(await calcularFreteCheckout())) return;
 
   const subtotal = cart.reduce((s,i) => s + i.preco * i.qty, 0);
+  const regra = regraPedidoAtual(subtotal);
+  if (!regra.permitido) return toast(`Adicione mais R$ ${regra.faltante.toFixed(2)} para atingir o pedido mínimo`);
 
   const r = await api('/api/pedidos', {
     method:'POST',
@@ -804,6 +841,7 @@ async function finalizarPedido() {
   window.pedidoConfirmarData = {
     subtotal: Number(r.total_produtos),
     frete: Number(r.taxa_entrega),
+    taxaPedidoPequeno: Number(r.taxa_pedido_pequeno || 0),
     total: Number(r.total_final),
     tipo, pagamento, loja: cart[0].loja_nome
   };
@@ -826,6 +864,7 @@ function mostrarConfirmacao() {
       <p style="font-size:13px;color:var(--texto-sec);margin:8px 0">${d.loja}</p>
       
       <div class="detalhe"><strong>Subtotal:</strong> R$ ${d.subtotal.toFixed(2)}</div>
+      ${d.taxaPedidoPequeno ? `<div class="detalhe"><strong>Taxa de pedido pequeno:</strong> R$ ${d.taxaPedidoPequeno.toFixed(2)}</div>` : ''}
       <div class="detalhe"><strong>Frete:</strong> R$ ${d.frete.toFixed(2)}</div>
       <div class="valor-grande">R$ ${d.total.toFixed(2)}</div>
       <div class="detalhe"><strong>Pagamento:</strong> ${d.pagamento === 'pix' ? '📱 Pix' : d.pagamento === 'dinheiro' ? '💵 Dinheiro' : '💳 Cartão'}</div>
@@ -945,6 +984,7 @@ async function verDetalhePedido(id) {
       
       <hr style="margin:12px 0;border:none;border-top:1px solid var(--borda)">
       <div class="detalhe" style="font-size:14px"><strong>Subtotal:</strong> R$ ${p.total_produtos.toFixed(2)}</div>
+      ${Number(p.taxa_pedido_pequeno||0) ? `<div class="detalhe" style="font-size:14px"><strong>Taxa de pedido pequeno:</strong> R$ ${Number(p.taxa_pedido_pequeno).toFixed(2)}</div>` : ''}
       <div class="detalhe" style="font-size:14px"><strong>Frete:</strong> R$ ${(p.taxa_entrega || 0).toFixed(2)}</div>
       <div class="detalhe" style="font-size:18px;font-weight:700;color:var(--laranja);margin-top:8px"><strong>Total:</strong> R$ ${p.total_final.toFixed(2)}</div>
       
@@ -1127,9 +1167,13 @@ async function excluirMinhaConta(){
 }
 
 // ============ INIT ============
-updateAuthUI();
-updateCartBadge();
-renderHome();
+async function inicializarAplicativo(){
+  updateAuthUI();
+  updateCartBadge();
+  await carregarConfiguracaoCompra();
+  await renderHome();
+}
+inicializarAplicativo();
 </script>
 <script>
 if('serviceWorker' in navigator) {

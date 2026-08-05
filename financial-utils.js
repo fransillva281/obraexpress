@@ -17,9 +17,33 @@ function calcularPercentualPromocional(inicioPromocao, agora = new Date()) {
   return agora < fimPromocao ? 5 : 7;
 }
 
+function calcularTaxaPedidoPequeno(totalProdutos, configuracao = {}) {
+  const produtos = arredondarDinheiro(totalProdutos);
+  const pedidoMinimo = arredondarDinheiro(configuracao.pedido_minimo ?? 15);
+  const limitePedidoPequeno = arredondarDinheiro(configuracao.limite_pedido_pequeno ?? 25);
+  const taxaConfigurada = arredondarDinheiro(configuracao.taxa_pedido_pequeno ?? 1.99);
+
+  if (![produtos, pedidoMinimo, limitePedidoPequeno, taxaConfigurada].every(Number.isFinite)) {
+    throw new Error('Configuração de pedido mínimo inválida');
+  }
+  if (pedidoMinimo < 0 || limitePedidoPequeno < pedidoMinimo || taxaConfigurada < 0) {
+    throw new Error('Configuração de pedido mínimo inválida');
+  }
+
+  const permitido = produtos >= pedidoMinimo;
+  return {
+    permitido,
+    pedidoMinimo,
+    limitePedidoPequeno,
+    valorFaltante: permitido ? 0 : arredondarDinheiro(pedidoMinimo - produtos),
+    taxaAplicada: permitido && produtos < limitePedidoPequeno ? taxaConfigurada : 0
+  };
+}
+
 function calcularFinanceiroPedido({
   totalProdutos,
   taxaEntrega,
+  taxaPedidoPequeno = 0,
   tipoEntrega,
   planoLoja,
   comissaoPercentual = 5,
@@ -27,6 +51,7 @@ function calcularFinanceiroPedido({
 }) {
   const produtos = arredondarDinheiro(totalProdutos);
   const entrega = tipoEntrega === 'entrega' ? arredondarDinheiro(taxaEntrega) : 0;
+  const pedidoPequeno = arredondarDinheiro(taxaPedidoPequeno);
   const plano = normalizarPlanoLoja(planoLoja);
   const percentual = Number(comissaoPercentual);
   const comissaoLoja = arredondarDinheiro(produtos * percentual / 100);
@@ -44,14 +69,17 @@ function calcularFinanceiroPedido({
     valorLiquidoLoja,
     valorMotoboy,
     valorPlataformaEntrega,
-    totalFinal: arredondarDinheiro(produtos + entrega),
-    taxaEntrega: entrega
+    valorPlataformaPedidoPequeno: pedidoPequeno,
+    totalFinal: arredondarDinheiro(produtos + entrega + pedidoPequeno),
+    taxaEntrega: entrega,
+    taxaPedidoPequeno: pedidoPequeno
   };
 }
 
 module.exports = {
   arredondarDinheiro,
   calcularPercentualPromocional,
+  calcularTaxaPedidoPequeno,
   calcularFinanceiroPedido,
   normalizarPlanoLoja
 };

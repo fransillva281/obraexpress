@@ -1,4 +1,4 @@
-const CACHE = 'obraexpress-v7-gps';
+const CACHE = 'obraexpress-v8-pedido-minimo';
 const urls = ['/', '/loja/', '/entregador/', '/admin/', '/manifest.json'];
 
 self.addEventListener('install', e => {

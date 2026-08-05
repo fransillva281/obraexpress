@@ -15,6 +15,7 @@ const {
 const {
   arredondarDinheiro,
   calcularPercentualPromocional,
+  calcularTaxaPedidoPequeno,
   calcularFinanceiroPedido,
   normalizarPlanoLoja
 } = require('./financial-utils');
@@ -62,14 +63,17 @@ function horarioDePico(agora = new Date()) {
 
 async function obterConfiguracaoFrete() {
   return (await dbGet('SELECT * FROM configuracoes_plataforma WHERE id = 1')) || {
-    frete_base: 5,
-    valor_km: 2,
+    frete_base: 4,
+    valor_km: 1.5,
     fator_rota: 1.2,
-    adicional_chuva_percentual: 15,
-    adicional_pico_percentual: 10,
-    limite_adicionais_percentual: 25,
+    adicional_chuva_percentual: 10,
+    adicional_pico_percentual: 5,
+    limite_adicionais_percentual: 15,
     condicao_climatica: 'normal',
-    entregas_ativas: 1
+    entregas_ativas: 1,
+    pedido_minimo: 15,
+    limite_pedido_pequeno: 25,
+    taxa_pedido_pequeno: 1.99
   };
 }
 
@@ -496,6 +500,15 @@ async function montarItensPedido(lojaId, itens) {
   return { itens: itensConfirmados, totalProdutos: arredondarDinheiro(total) };
 }
 
+app.get('/api/configuracoes-compra', async (req, res) => {
+  const config = await obterConfiguracaoFrete();
+  res.json({
+    pedido_minimo: Number(config.pedido_minimo),
+    limite_pedido_pequeno: Number(config.limite_pedido_pequeno),
+    taxa_pedido_pequeno: Number(config.taxa_pedido_pequeno)
+  });
+});
+
 app.post('/api/frete/cotacao', authCliente, async (req, res) => {
   try {
     const { loja_id, latitude, longitude } = req.body;
@@ -519,6 +532,16 @@ app.post('/api/pedidos', authCliente, async (req, res) => {
     const loja = await dbGet('SELECT id, plano, comissao_percentual, inicio_promocao, latitude, longitude FROM lojas WHERE id = ? AND aberto = 1', [loja_id]);
     if (!loja) return res.status(404).json({ error: 'Loja não encontrada ou fechada' });
     const carrinho = await montarItensPedido(loja_id, itens);
+    const configuracao = await obterConfiguracaoFrete();
+    const regraPedido = calcularTaxaPedidoPequeno(carrinho.totalProdutos, configuracao);
+    if (!regraPedido.permitido) {
+      return res.status(400).json({
+        error: `O pedido mínimo é R$ ${regraPedido.pedidoMinimo.toFixed(2)}. Adicione mais R$ ${regraPedido.valorFaltante.toFixed(2)} em produtos.`,
+        codigo: 'PEDIDO_MINIMO_NAO_ATINGIDO',
+        pedido_minimo: regraPedido.pedidoMinimo,
+        valor_faltante: regraPedido.valorFaltante
+      });
+    }
     const cotacao = tipo_entrega === 'entrega'
       ? await calcularCotacaoFrete(loja, latitude_entrega, longitude_entrega)
       : { valor_frete: 0, distancia_km: 0, taxa_base: 0, adicional_clima_percentual: 0, adicional_pico_percentual: 0 };
@@ -527,6 +550,7 @@ app.post('/api/pedidos', authCliente, async (req, res) => {
     const financeiro = calcularFinanceiroPedido({
       totalProdutos: carrinho.totalProdutos,
       taxaEntrega: cotacao.valor_frete,
+      taxaPedidoPequeno: regraPedido.taxaAplicada,
       tipoEntrega: tipo_entrega,
       planoLoja: loja.plano,
       comissaoPercentual: comissaoLoja,
@@ -535,15 +559,17 @@ app.post('/api/pedidos', authCliente, async (req, res) => {
     const codigo = Math.random().toString(36).substring(2, 8).toUpperCase();
 
     const result = await dbRun(`INSERT INTO pedidos
-      (cliente_id, loja_id, itens, total_produtos, taxa_entrega, total_final, tipo_entrega,
+      (cliente_id, loja_id, itens, total_produtos, taxa_entrega, taxa_pedido_pequeno,
+       pedido_minimo_aplicado, limite_pedido_pequeno_aplicado, total_final, tipo_entrega,
        endereco_entrega, bairro_entrega, latitude_entrega, longitude_entrega, distancia_km,
        forma_pagamento, observacao, codigo_retirada, status, valor_motoboy, valor_plataforma,
        plano_loja, comissao_loja_percentual, comissao_entrega_percentual,
        taxa_base_entrega, adicional_clima_percentual, adicional_pico_percentual,
        valor_comissao_loja, valor_liquido_loja)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [req.usuario.id, loja_id, JSON.stringify(carrinho.itens), carrinho.totalProdutos,
-       financeiro.taxaEntrega, financeiro.totalFinal, tipo_entrega, endereco_entrega,
+       financeiro.taxaEntrega, financeiro.taxaPedidoPequeno, regraPedido.pedidoMinimo,
+       regraPedido.limitePedidoPequeno, financeiro.totalFinal, tipo_entrega, endereco_entrega,
        bairro_entrega, latitude_entrega || null, longitude_entrega || null, cotacao.distancia_km,
        forma_pagamento || 'pix', observacao, tipo_entrega === 'retirada' ? codigo : null, 'aguardando_confirmacao',
        financeiro.valorMotoboy, financeiro.valorPlataformaEntrega, financeiro.planoLoja,
@@ -557,6 +583,7 @@ app.post('/api/pedidos', authCliente, async (req, res) => {
       codigo_retirada: tipo_entrega === 'retirada' ? codigo : null,
       total_produtos: carrinho.totalProdutos,
       taxa_entrega: financeiro.taxaEntrega,
+      taxa_pedido_pequeno: financeiro.taxaPedidoPequeno,
       total_final: financeiro.totalFinal,
       distancia_km: cotacao.distancia_km,
       adicional_clima_percentual: cotacao.adicional_clima_percentual,
@@ -729,6 +756,7 @@ async function registrarRepasseFinanceiro(tx, pedido, entregadorId = null) {
   const comissaoLoja = Number(pedido.valor_comissao_loja || 0);
   const valorMotoboy = entregadorId ? Number(pedido.valor_motoboy || 0) : 0;
   const valorPlataformaEntrega = Number(pedido.valor_plataforma || 0);
+  const taxaPedidoPequeno = Number(pedido.taxa_pedido_pequeno || 0);
 
   await tx.run('INSERT INTO saldo_lojas (loja_id) VALUES (?) ON CONFLICT (loja_id) DO NOTHING', [pedido.loja_id]);
   await tx.run(`UPDATE saldo_lojas SET saldo = saldo + ?, total_recebido = total_recebido + ?
@@ -745,6 +773,10 @@ async function registrarRepasseFinanceiro(tx, pedido, entregadorId = null) {
   if (valorPlataformaEntrega > 0) {
     await tx.run('INSERT INTO saldo_plataforma (descricao, valor, tipo, pedido_id) VALUES (?, ?, ?, ?)',
       [`Receita da entrega — pedido #${pedido.id}`, valorPlataformaEntrega, 'credito', pedido.id]);
+  }
+  if (taxaPedidoPequeno > 0) {
+    await tx.run('INSERT INTO saldo_plataforma (descricao, valor, tipo, pedido_id) VALUES (?, ?, ?, ?)',
+      [`Taxa de pedido pequeno — pedido #${pedido.id}`, taxaPedidoPequeno, 'credito', pedido.id]);
   }
 
   if (entregadorId) {
@@ -775,7 +807,7 @@ app.put('/api/pedidos/:id/finalizar', authEntregador, async (req, res) => {
       if (pedido.status !== 'saiu_entrega') throw Object.assign(new Error('Pedido não está em entrega'), { status: 400 });
       await tx.run("UPDATE pedidos SET foto_entrega = ?, status = 'entregue', data_entrega = CURRENT_TIMESTAMP WHERE id = ?", [foto, pedido.id]);
       await registrarRepasseFinanceiro(tx, pedido, req.usuario.id);
-      return { creditado: Number(pedido.valor_motoboy || 0), valorPlataforma: Number(pedido.valor_plataforma || 0) + Number(pedido.valor_comissao_loja || 0) };
+      return { creditado: Number(pedido.valor_motoboy || 0), valorPlataforma: Number(pedido.valor_plataforma || 0) + Number(pedido.valor_comissao_loja || 0) + Number(pedido.taxa_pedido_pequeno || 0) };
     });
     res.json({ success: true, message: '✅ Entrega finalizada!', creditado: resultado.creditado, valor_plataforma: resultado.valorPlataforma });
   } catch (error) {
@@ -907,13 +939,17 @@ app.get('/api/admin/configuracoes-entrega', authAdmin, async (req, res) => {
 });
 
 app.put('/api/admin/configuracoes-entrega', authAdmin, async (req, res) => {
+  const configuracaoAtual = await obterConfiguracaoFrete();
   const limites = {
     frete_base: [0, 100],
     valor_km: [0, 100],
     fator_rota: [1, 3],
     adicional_chuva_percentual: [0, 100],
     adicional_pico_percentual: [0, 100],
-    limite_adicionais_percentual: [0, 100]
+    limite_adicionais_percentual: [0, 100],
+    pedido_minimo: [0, 1000],
+    limite_pedido_pequeno: [0, 1000],
+    taxa_pedido_pequeno: [0, 100]
   };
   const updates = [];
   const params = [];
@@ -923,6 +959,11 @@ app.put('/api/admin/configuracoes-entrega', authAdmin, async (req, res) => {
       if (!Number.isFinite(valor) || valor < minimo || valor > maximo) return res.status(400).json({ error: `Valor inválido em ${campo}` });
       updates.push(`${campo} = ?`); params.push(valor);
     }
+  }
+  const pedidoMinimo = req.body.pedido_minimo === undefined ? Number(configuracaoAtual.pedido_minimo) : Number(req.body.pedido_minimo);
+  const limitePedidoPequeno = req.body.limite_pedido_pequeno === undefined ? Number(configuracaoAtual.limite_pedido_pequeno) : Number(req.body.limite_pedido_pequeno);
+  if (limitePedidoPequeno < pedidoMinimo) {
+    return res.status(400).json({ error: 'O limite do pedido pequeno não pode ser menor que o pedido mínimo' });
   }
   if (req.body.condicao_climatica !== undefined) {
     if (!['normal', 'chuva', 'perigoso'].includes(req.body.condicao_climatica)) return res.status(400).json({ error: 'Condição climática inválida' });

@@ -140,7 +140,7 @@ body{background:var(--bg);color:var(--texto)}
     <!-- Aba Entregas -->
     <div id="aba-entregas" style="display:none">
       <div class="card">
-        <h3>🧭 Frete e GPS</h3>
+        <h3>🧭 Frete, pedidos e GPS</h3>
         <p class="info" style="margin-bottom:12px">O valor é fechado antes do pedido: base + distância, com adicionais limitados. Horário de pico automático: 11h–14h e 17h–20h.</p>
         <div class="form-group"><label>Valor inicial do frete (R$)</label><input type="number" id="cfg-frete-base" min="0" step="0.01"></div>
         <div class="form-group"><label>Valor por quilômetro (R$)</label><input type="number" id="cfg-valor-km" min="0" step="0.01"></div>
@@ -148,6 +148,11 @@ body{background:var(--bg);color:var(--texto)}
         <div class="form-group"><label>Adicional de chuva (%)</label><input type="number" id="cfg-chuva" min="0" step="1"></div>
         <div class="form-group"><label>Adicional de horário de pico (%)</label><input type="number" id="cfg-pico" min="0" step="1"></div>
         <div class="form-group"><label>Limite máximo dos adicionais (%)</label><input type="number" id="cfg-limite" min="0" step="1"></div>
+        <div style="margin:16px 0 10px;border-top:1px solid var(--borda);padding-top:14px"><strong>🛒 Pedido mínimo e receita</strong></div>
+        <div class="form-group"><label>Pedido mínimo em produtos (R$)</label><input type="number" id="cfg-pedido-minimo" min="0" step="0.01"></div>
+        <div class="form-group"><label>Até qual valor é pedido pequeno (R$)</label><input type="number" id="cfg-limite-pedido-pequeno" min="0" step="0.01"></div>
+        <div class="form-group"><label>Taxa de pedido pequeno para a ObraExpress (R$)</label><input type="number" id="cfg-taxa-pedido-pequeno" min="0" step="0.01"></div>
+        <p class="info" style="margin-bottom:12px">O servidor impede pedidos abaixo do mínimo. A taxa é mostrada claramente ao cliente e creditada à ObraExpress somente quando o pedido é concluído.</p>
         <div class="form-group"><label>Condição climática atual</label><select id="cfg-clima"><option value="normal">☀️ Normal</option><option value="chuva">🌧️ Chuva — aplicar adicional</option><option value="perigoso">⚠️ Perigoso — pausar entregas</option></select></div>
         <div class="form-group"><label>Entregas</label><select id="cfg-entregas"><option value="1">✅ Ativas</option><option value="0">⛔ Pausadas</option></select></div>
         <button class="btn btn-primary" onclick="salvarConfiguracoesEntrega()">Salvar configuração de entrega</button>
@@ -260,6 +265,7 @@ async function carregarPedidos(status) {
       </div>
       <div class="info">👤 ${p.cliente_nome}${p.entregador_nome ? ' • 🛵 '+p.entregador_nome : ' • ⏳ Sem entregador'} • R$ ${p.total_final.toFixed(2)} • ${p.data_pedido}</div>
       <div class="info">Produtos: R$ ${Number(p.total_produtos||0).toFixed(2)} • Comissão loja: R$ ${Number(p.valor_comissao_loja||0).toFixed(2)} • Líquido loja: R$ ${Number(p.valor_liquido_loja||0).toFixed(2)}</div>
+      ${Number(p.taxa_pedido_pequeno||0) ? `<div class="info">Taxa de pedido pequeno para a ObraExpress: R$ ${Number(p.taxa_pedido_pequeno).toFixed(2)}</div>` : ''}
     </div>
   `).join('');
 }
@@ -314,6 +320,9 @@ async function carregarConfiguracoesEntrega(){
   document.getElementById('cfg-chuva').value=Number(c.adicional_chuva_percentual);
   document.getElementById('cfg-pico').value=Number(c.adicional_pico_percentual);
   document.getElementById('cfg-limite').value=Number(c.limite_adicionais_percentual);
+  document.getElementById('cfg-pedido-minimo').value=Number(c.pedido_minimo);
+  document.getElementById('cfg-limite-pedido-pequeno').value=Number(c.limite_pedido_pequeno);
+  document.getElementById('cfg-taxa-pedido-pequeno').value=Number(c.taxa_pedido_pequeno);
   document.getElementById('cfg-clima').value=c.condicao_climatica;
   document.getElementById('cfg-entregas').value=Number(c.entregas_ativas)?'1':'0';
   document.getElementById('cfg-status').textContent=r.horario_pico?'🟠 Horário de pico ativo agora.':'🟢 Fora do horário de pico agora.';
@@ -327,6 +336,9 @@ async function salvarConfiguracoesEntrega(){
     adicional_chuva_percentual:Number(document.getElementById('cfg-chuva').value),
     adicional_pico_percentual:Number(document.getElementById('cfg-pico').value),
     limite_adicionais_percentual:Number(document.getElementById('cfg-limite').value),
+    pedido_minimo:Number(document.getElementById('cfg-pedido-minimo').value),
+    limite_pedido_pequeno:Number(document.getElementById('cfg-limite-pedido-pequeno').value),
+    taxa_pedido_pequeno:Number(document.getElementById('cfg-taxa-pedido-pequeno').value),
     condicao_climatica:document.getElementById('cfg-clima').value,
     entregas_ativas:document.getElementById('cfg-entregas').value==='1'
   };

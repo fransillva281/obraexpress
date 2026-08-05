@@ -254,6 +254,7 @@ async function carregarPedidosLoja(){
       <div class="total">R$ ${p.total_final.toFixed(2)}</div>
       <div class="finance-box">
         Produtos: R$ ${Number(p.total_produtos||0).toFixed(2)}<br>
+        ${Number(p.taxa_pedido_pequeno||0) ? `Taxa de pedido pequeno (ObraExpress): R$ ${Number(p.taxa_pedido_pequeno).toFixed(2)}<br>` : ''}
         Comissão ObraExpress (${Number(p.comissao_loja_percentual||5).toFixed(0)}%): - R$ ${Number(p.valor_comissao_loja||0).toFixed(2)}<br>
         <strong>Líquido da loja: R$ ${Number(p.valor_liquido_loja||0).toFixed(2)}</strong>
       </div>

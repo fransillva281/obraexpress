@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { buildRunSql, isUniqueViolation, toPostgresSql } = require('../database-utils');
-const { calcularFinanceiroPedido, calcularPercentualPromocional, normalizarPlanoLoja } = require('../financial-utils');
+const { calcularFinanceiroPedido, calcularPercentualPromocional, calcularTaxaPedidoPequeno, normalizarPlanoLoja } = require('../financial-utils');
 
 test('converte placeholders para o formato do PostgreSQL', () => {
   assert.equal(
@@ -86,6 +86,39 @@ test('aplica comissão promocional de 5% no plano Entrega ObraExpress', () => {
   assert.equal(calculo.totalFinal, 110);
 });
 
+test('bloqueia pedido abaixo de R$ 15 e informa quanto falta', () => {
+  const regra = calcularTaxaPedidoPequeno(9.99, {
+    pedido_minimo: 15,
+    limite_pedido_pequeno: 25,
+    taxa_pedido_pequeno: 1.99
+  });
+  assert.equal(regra.permitido, false);
+  assert.equal(regra.valorFaltante, 5.01);
+  assert.equal(regra.taxaAplicada, 0);
+});
+
+test('cobra taxa apenas entre o pedido mínimo e o limite pequeno', () => {
+  const configuracao = { pedido_minimo: 15, limite_pedido_pequeno: 25, taxa_pedido_pequeno: 1.99 };
+  assert.equal(calcularTaxaPedidoPequeno(20, configuracao).taxaAplicada, 1.99);
+  assert.equal(calcularTaxaPedidoPequeno(25, configuracao).taxaAplicada, 0);
+});
+
+test('taxa de pedido pequeno pertence à plataforma e entra no total', () => {
+  const calculo = calcularFinanceiroPedido({
+    totalProdutos: 20,
+    taxaEntrega: 10,
+    taxaPedidoPequeno: 1.99,
+    tipoEntrega: 'entrega',
+    planoLoja: 'entrega_obraexpress',
+    comissaoPercentual: 5,
+    percentualEntregador: 95
+  });
+  assert.equal(calculo.valorLiquidoLoja, 19);
+  assert.equal(calculo.valorMotoboy, 9.5);
+  assert.equal(calculo.valorPlataformaPedidoPequeno, 1.99);
+  assert.equal(calculo.totalFinal, 31.99);
+});
+
 test('aplica comissão de 5% e repassa o frete no Plano Loja', () => {
   const calculo = calcularFinanceiroPedido({
     totalProdutos: 100,
@@ -134,4 +167,25 @@ test('GPS e frete dinâmico estão ligados nas quatro interfaces', () => {
   assert.match(entregador, /Rota 1: ir até a loja/);
   assert.match(entregador, /Rota 2: ir até o cliente/);
   assert.match(admin, /configuracoes-entrega/);
+});
+
+test('pedido mínimo é configurável e validado no servidor', () => {
+  const raiz = path.join(__dirname, '..');
+  const schema = fs.readFileSync(path.join(raiz, 'db', 'schema.sql'), 'utf8');
+  const servidor = fs.readFileSync(path.join(raiz, 'server.js'), 'utf8');
+  const cliente = fs.readFileSync(path.join(raiz, 'frontend', 'index.html'), 'utf8');
+  const admin = fs.readFileSync(path.join(raiz, 'admin', 'index.html'), 'utf8');
+  assert.match(schema, /pedido_minimo NUMERIC\(12,2\).*DEFAULT 15\.00/);
+  assert.match(schema, /taxa_pedido_pequeno NUMERIC\(12,2\).*DEFAULT 1\.99/);
+  assert.match(servidor, /PEDIDO_MINIMO_NAO_ATINGIDO/);
+  assert.match(servidor, /calcularTaxaPedidoPequeno\(carrinho\.totalProdutos/);
+  assert.match(cliente, /Taxa de pedido pequeno/);
+  assert.match(admin, /cfg-pedido-minimo/);
+
+  const insertPedido = servidor.match(/INSERT INTO pedidos\s*\(([\s\S]*?)\)\s*VALUES\s*\(([\s\S]*?)\)/);
+  assert.ok(insertPedido, 'cadastro do pedido não encontrado');
+  const totalColunas = insertPedido[1].split(',').length;
+  const totalValores = (insertPedido[2].match(/\?/g) || []).length;
+  assert.equal(totalColunas, 29);
+  assert.equal(totalValores, totalColunas);
 });
