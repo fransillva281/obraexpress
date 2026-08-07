@@ -19,9 +19,15 @@ com uma mensagem clara para impedir gravações temporárias.
 4. Crie `JWT_SECRET` e use o botão **Generate** do Render para gerar o valor.
 5. Crie `ADMIN_EMAIL` com o e-mail que poderá entrar no painel administrativo.
 6. Crie `ADMIN_PASSWORD` com uma senha forte e exclusiva.
-7. Use `npm ci` como **Build Command**.
-8. Use `npm start` como **Start Command**.
-9. Salve escolhendo a opção que também inicia um novo deploy.
+7. Preencha os dados públicos obrigatórios que aparecerão nos Termos:
+   - `EMPRESA_NOME`: nome empresarial ou nome do responsável;
+   - `EMPRESA_DOCUMENTO`: CNPJ ou documento aplicável;
+   - `EMPRESA_ENDERECO`: endereço completo para atendimento;
+   - `EMPRESA_EMAIL_SUPORTE`: contato do consumidor;
+   - `EMPRESA_EMAIL_PRIVACIDADE`: contato para pedidos da LGPD.
+8. Use `npm ci` como **Build Command**.
+9. Use `npm start` como **Start Command**.
+10. Salve escolhendo a opção que também inicia um novo deploy.
 
 ## 3. Confirmar nos logs
 
@@ -53,6 +59,8 @@ Se o login continuar funcionando, o cadastro permaneceu no PostgreSQL.
 - Dados de um arquivo SQLite perdido em deploys anteriores não podem ser
   recuperados sem uma cópia desse arquivo.
 - Não coloque a URL real do banco em `.env`, documentação ou commits do GitHub.
+- Não inicie pagamentos reais enquanto a identificação empresarial estiver
+  incompleta e os Termos não tiverem sido revisados por profissional jurídico.
 - Para serviços no mesmo Render e na mesma região, prefira a Internal Database
   URL, conforme a documentação oficial do Render.
 

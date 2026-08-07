@@ -49,6 +49,7 @@ body{background:var(--bg);color:var(--texto)}
 .saldo-card .label{font-size:12px;opacity:.8}
 .toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:#37474F;color:var(--branco);padding:12px 24px;border-radius:12px;font-size:14px;z-index:999;display:none}
 .sound-alert{margin:10px 16px 0;width:calc(100% - 32px);padding:10px;border:1px solid #FFB74D;border-radius:10px;background:#FFF3E0;color:var(--laranja-escuro);font-weight:700;cursor:pointer}
+.legal-check{display:flex;align-items:flex-start;gap:9px;background:#fff8f3;border:1px solid #ffd2ba;border-radius:10px;padding:11px;margin:8px 16px;font-size:13px;line-height:1.45}.legal-check input{width:20px;height:20px;flex:0 0 auto;margin-top:1px}.legal-check a{color:var(--laranja);font-weight:700}.legal-modal{display:none;position:fixed;inset:0;background:#102027cc;z-index:1000;padding:18px}.legal-modal.active{display:flex;align-items:center;justify-content:center}.legal-modal-card{background:#fff;border-radius:18px;padding:20px;max-width:620px;width:100%;max-height:94vh;overflow:auto}.legal-modal-card h2{color:var(--laranja);margin-bottom:8px}.legal-modal-card p{font-size:14px;color:var(--texto-sec);line-height:1.55}
 </style>
 </head>
 <body>
@@ -61,6 +62,7 @@ body{background:var(--bg);color:var(--texto)}
       <div class="form-group"><label>Email</label><input type="email" id="login-email" placeholder="motoboy@email.com"></div>
       <div class="form-group"><label>Senha</label><input type="password" id="login-senha" placeholder="Sua senha"></div>
       <button class="btn btn-primary" onclick="loginEntregador()">Entrar</button>
+      <a class="btn btn-outline" href="/termos.html?perfil=entregador" target="_blank" rel="noopener">📜 Ler Termos e Regras</a>
       <div style="text-align:center;padding:16px;font-size:13px;color:var(--texto-sec)">Não tem conta? <button type="button" style="background:none;border:0;color:var(--laranja);font-weight:600;cursor:pointer;padding:0;font-size:13px" onclick="showCadastro()">Cadastre-se como entregador</button></div>
     </div>
     <div id="cadastro-form" style="display:none">
@@ -72,6 +74,9 @@ body{background:var(--bg);color:var(--texto)}
       <div class="form-group"><label>Placa (opcional)</label><input type="text" id="cad-placa" placeholder="ABC-1234"></div>
       <div class="form-group"><label>Chave Pix (para receber)</label><input type="text" id="cad-pix" placeholder="CPF, email ou telefone"></div>
       <div class="form-group"><label>Senha</label><input type="password" id="cad-senha" placeholder="Crie uma senha"></div>
+      <label class="legal-check"><input type="checkbox" id="cad-aceite-termos"> <span>Li e aceito os <a href="/termos.html?perfil=entregador#termos" target="_blank" rel="noopener">Termos de Uso e as Regras do Entregador</a>.</span></label>
+      <label class="legal-check"><input type="checkbox" id="cad-aceite-privacidade"> <span>Li a <a href="/termos.html?perfil=entregador#privacidade" target="_blank" rel="noopener">Política de Privacidade</a> e entendi o uso do GPS.</span></label>
+      <label class="legal-check"><input type="checkbox" id="cad-requisitos-profissionais"> <span>Declaro que tenho capacidade legal para prestar o serviço e cumpro os requisitos aplicáveis de habilitação, veículo, equipamento e segurança.</span></label>
       <button class="btn btn-primary" onclick="cadastroEntregador()">Cadastrar</button>
       <div style="text-align:center;padding:16px;font-size:13px;color:var(--texto-sec)">Já tem conta? <a style="color:var(--laranja);font-weight:600;cursor:pointer" onclick="showLogin()">Fazer login</a></div>
     </div>
@@ -88,10 +93,23 @@ body{background:var(--bg);color:var(--texto)}
     <button id="tab-disponiveis-entregador" class="tab active" onclick="switchTab('disponiveis',this)">🆕 Disponíveis</button>
     <button class="tab" onclick="switchTab('minhas-entregas',this)">🛵 Minhas</button>
     <button class="tab" onclick="switchTab('perfil',this)">👤 Perfil</button>
+    <button class="tab" onclick="switchTab('termos',this)">📜 Termos</button>
   </div>
   <div id="tab-disponiveis"></div>
   <div id="tab-minhas-entregas" style="display:none"></div>
   <div id="tab-perfil" style="display:none"></div>
+  <div id="tab-termos" style="display:none"></div>
+</div>
+
+<div id="legal-modal" class="legal-modal" role="dialog" aria-modal="true" aria-labelledby="legal-title">
+  <div class="legal-modal-card">
+    <h2 id="legal-title">📜 Leia para continuar</h2>
+    <p>Leia as regras de trânsito e segurança, uso do GPS, itens proibidos, comprovação de entrega e cálculo do ganho.</p>
+    <a class="btn btn-outline" href="/termos.html?perfil=entregador" target="_blank" rel="noopener">Abrir documento completo</a>
+    <label class="legal-check" style="margin:8px 0"><input type="checkbox" id="legal-aceite-termos"> <span>Li e aceito os Termos de Uso e as Regras do Entregador.</span></label>
+    <label class="legal-check" style="margin:8px 0"><input type="checkbox" id="legal-aceite-privacidade"> <span>Li a Política de Privacidade e entendi o uso do GPS.</span></label>
+    <button class="btn btn-primary" onclick="confirmarAceiteLegalEntregador()">Aceitar e continuar</button>
+  </div>
 </div>
 
 <script>
@@ -179,6 +197,29 @@ function textoDistanciaColeta(p){
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',3000);}
 async function api(path,opts={}){const h={'Content-Type':'application/json'};if(token)h['Authorization']='Bearer '+token;try{const r=await fetch(API+path,{...opts,headers:h});return await r.json()}catch(e){return{error:e.message}}}
 
+let continuarDepoisAceiteEntregador=null;
+function mostrarAceiteLegalEntregador(continuar){
+  continuarDepoisAceiteEntregador=continuar||null;
+  document.getElementById('legal-aceite-termos').checked=false;
+  document.getElementById('legal-aceite-privacidade').checked=false;
+  document.getElementById('legal-modal').classList.add('active');
+}
+async function confirmarAceiteLegalEntregador(){
+  const aceitou_termos=document.getElementById('legal-aceite-termos').checked;
+  const aceitou_privacidade=document.getElementById('legal-aceite-privacidade').checked;
+  if(!aceitou_termos||!aceitou_privacidade)return toast('Marque as duas confirmações');
+  const r=await api('/api/legal/aceite',{method:'POST',body:JSON.stringify({aceitou_termos,aceitou_privacidade})});
+  if(r.error)return toast(r.error);
+  document.getElementById('legal-modal').classList.remove('active');
+  const continuar=continuarDepoisAceiteEntregador;continuarDepoisAceiteEntregador=null;if(continuar)continuar();
+}
+async function verificarAceiteLegalEntregador(){
+  if(!token)return false;
+  const r=await api('/api/legal/aceite');
+  if(r.termos_pendentes){mostrarAceiteLegalEntregador(()=>{entrarDashboard();iniciarGPS()});return false}
+  return true;
+}
+
 function showCadastro(){document.getElementById('login-form').style.display='none';document.getElementById('cadastro-form').style.display='block'}
 function showLogin(){document.getElementById('login-form').style.display='block';document.getElementById('cadastro-form').style.display='none'}
 
@@ -192,8 +233,8 @@ async function loginEntregador(){
   token=r.token;entregador=r.entregador;
   localStorage.setItem('entregador_token',token);localStorage.setItem('entregador',JSON.stringify(entregador));
   document.getElementById('entregador-header-name').textContent=entregador.nome;
-  toast('Bem-vindo, '+entregador.nome+'!');entrarDashboard();
-  iniciarGPS();
+  const continuar=()=>{toast('Bem-vindo, '+entregador.nome+'!');entrarDashboard();iniciarGPS()};
+  if(r.termos_pendentes)mostrarAceiteLegalEntregador(continuar);else continuar();
 }
 
 async function cadastroEntregador(){
@@ -205,9 +246,14 @@ async function cadastroEntregador(){
     veiculo:document.getElementById('cad-veiculo').value,
     placa:document.getElementById('cad-placa').value,
     chave_pix:document.getElementById('cad-pix').value,
-    senha:document.getElementById('cad-senha').value
+    senha:document.getElementById('cad-senha').value,
+    aceitou_termos:document.getElementById('cad-aceite-termos').checked,
+    aceitou_privacidade:document.getElementById('cad-aceite-privacidade').checked,
+    declarou_requisitos_profissionais:document.getElementById('cad-requisitos-profissionais').checked
   };
   if(!d.nome||!d.email||!d.senha)return toast('Preencha nome, email e senha');
+  if(!d.aceitou_termos||!d.aceitou_privacidade)return toast('Leia e marque as duas confirmações');
+  if(!d.declarou_requisitos_profissionais)return toast('Confirme os requisitos profissionais e de segurança');
   const r=await api('/api/entregadores/cadastro',{method:'POST',body:JSON.stringify(d)});
   if(r.error)return toast(r.error);
   token=r.token;entregador=r.entregador;
@@ -237,10 +283,15 @@ async function iniciarMonitorEntregas(){
 function switchTab(tab,btn){
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   btn.classList.add('active');
-  ['disponiveis','minhas-entregas','perfil'].forEach(t=>document.getElementById('tab-'+t).style.display=t===tab?'block':'none');
+  ['disponiveis','minhas-entregas','perfil','termos'].forEach(t=>document.getElementById('tab-'+t).style.display=t===tab?'block':'none');
   if(tab==='disponiveis')carregarDisponiveis();
   if(tab==='minhas-entregas')carregarMinhasEntregas();
   if(tab==='perfil')carregarPerfil();
+  if(tab==='termos')carregarTermosEntregador();
+}
+
+function carregarTermosEntregador(){
+  document.getElementById('tab-termos').innerHTML=`<div class="card"><h3>📜 Termos, regras e privacidade</h3><p class="meta" style="line-height:1.6;margin:8px 0">Consulte regras de segurança, GPS, carga permitida, comprovantes e cálculo do ganho antes de aceitar entregas.</p><a class="btn btn-primary" href="/termos.html?perfil=entregador" target="_blank" rel="noopener">Abrir documento completo</a></div>`;
 }
 
 async function carregarSaldo(){
@@ -255,7 +306,7 @@ async function carregarSaldo(){
         <span>✅ Total ganho: R$ ${saldo.total_ganho.toFixed(2)}</span>
         <span>💳 Sacado: R$ ${saldo.total_sacado.toFixed(2)}</span>
       </div>
-      <div style="font-size:12px;opacity:.9;margin-top:9px">Você recebe ${(100-Number(entregador.comissao_percentual||5)).toFixed(0)}% do frete; a ObraExpress fica com ${Number(entregador.comissao_percentual||5).toFixed(0)}%. Após 5 meses da primeira entrega, a taxa passa para 7%.</div>
+      <div style="font-size:12px;opacity:.9;margin-top:9px">O ganho é líquido e considera a rota completa: sua posição → loja → cliente. Existe um valor mínimo por entrega e bônus visível em chuva ou pico.</div>
     </div>
   `;
 }
@@ -284,14 +335,15 @@ async function carregarDisponiveis(){
       </div>
       <h3 style="text-align:center;margin:8px 0">🏪 ${p.loja_nome}</h3>
       <div class="valor-entrega">💰 R$ ${(p.valor_motoboy||0).toFixed(2)}</div>
-      <div class="meta" style="text-align:center">Você recebe ${(100-Number(p.comissao_entrega_percentual||5)).toFixed(0)}% do frete • ObraExpress ${Number(p.comissao_entrega_percentual||5).toFixed(0)}%</div>
+      <div class="meta" style="text-align:center">Valor líquido antes de aceitar${Number(p.bonus_entregador_percentual||0)>0?` • bônus ${Number(p.bonus_entregador_percentual).toFixed(0)}% incluído`:''}</div>
       
       <div class="info-rotas">
         <strong>📍 Coleta:</strong> ${p.loja_endereco||'Não informado'}<br>
         <strong>📍 Entrega:</strong> ${p.cliente_endereco||p.endereco_entrega||'Não informado'}<br>
         <strong>👤 Cliente:</strong> ${p.cliente_nome} ${p.cliente_telefone ? '• 📞 '+p.cliente_telefone : ''}<br>
         <strong>📏 ${Number(p.distancia_km||0).toFixed(1)} km da loja ao cliente</strong><br>
-        <strong>🧭 ${textoDistanciaColeta(p)}</strong>
+        <strong>🧭 ${Number(p.distancia_coleta_km||0).toFixed(1)} km até a loja</strong><br>
+        <strong>🛣️ ${Number(p.distancia_total_entrega_km||0).toFixed(1)} km de rota completa</strong>
       </div>
       
       <div class="actions">
@@ -463,8 +515,7 @@ function sair(){
 // Init
 if(entregador){
   document.getElementById('entregador-header-name').textContent=entregador.nome;
-  entrarDashboard();
-  iniciarGPS();
+  verificarAceiteLegalEntregador().then(ok=>{if(ok){entrarDashboard();iniciarGPS()}});
 }
 </script>
 <script>

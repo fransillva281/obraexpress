@@ -1,5 +1,9 @@
 # ObraExpress — GPS, frete e porcentagens promocionais
 
+> **Documento histórico.** O modelo vigente está em
+> `RELATORIO_FRETE_TERMOS.md`: faixas de frete para o cliente e ganho líquido
+> do entregador pela rota completa.
+
 ## O que esta versão faz
 
 - A loja grava sua localização GPS no cadastro ou no Perfil.

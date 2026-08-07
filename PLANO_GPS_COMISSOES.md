@@ -1,5 +1,9 @@
 # GPS, frete e comissões — versão implementada
 
+> **Documento histórico.** O modelo vigente está em
+> `RELATORIO_FRETE_TERMOS.md`: faixas de frete para o cliente e ganho líquido
+> do entregador pela rota completa.
+
 ## Regra recomendada
 
 Separar a rota em duas distâncias:

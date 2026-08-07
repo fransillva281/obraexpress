@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { buildRunSql, isUniqueViolation, toPostgresSql } = require('../database-utils');
-const { calcularFinanceiroPedido, calcularPercentualPromocional, calcularTaxaPedidoPequeno, normalizarPlanoLoja } = require('../financial-utils');
+const { calcularFinanceiroPedido, calcularFretePorFaixa, calcularGanhoLiquidoEntregador, calcularPercentualPromocional, calcularTaxaPedidoPequeno, normalizarPlanoLoja } = require('../financial-utils');
 
 test('converte placeholders para o formato do PostgreSQL', () => {
   assert.equal(
@@ -188,4 +188,44 @@ test('pedido mínimo é configurável e validado no servidor', () => {
   const totalValores = (insertPedido[2].match(/\?/g) || []).length;
   assert.equal(totalColunas, 29);
   assert.equal(totalValores, totalColunas);
+});
+
+test('frete do cliente usa faixas simples e bloqueia acima de 8 km', () => {
+  assert.deepEqual(calcularFretePorFaixa(1.8), {disponivel:true, distanciaMaxima:8, valor:5.99, faixa:'até 2 km'});
+  assert.equal(calcularFretePorFaixa(3.2).valor, 7.99);
+  assert.equal(calcularFretePorFaixa(5.5).valor, 10.99);
+  assert.equal(calcularFretePorFaixa(7.9).valor, 13.99);
+  assert.equal(calcularFretePorFaixa(8.1).disponivel, false);
+});
+
+test('entregador recebe mínimo ou valor da rota completa com bônus limitado', () => {
+  const curta = calcularGanhoLiquidoEntregador({distanciaColetaKm:1, distanciaEntregaKm:2});
+  assert.equal(curta.distanciaTotalKm, 3);
+  assert.equal(curta.valorLiquido, 7.5);
+  const longa = calcularGanhoLiquidoEntregador({distanciaColetaKm:3, distanciaEntregaKm:5, adicionalPercentual:20});
+  assert.equal(longa.valorBase, 12);
+  assert.equal(longa.bonusPercentual, 15);
+  assert.equal(longa.valorLiquido, 13.8);
+});
+
+test('termos, privacidade e aceite versionado existem nos três painéis', () => {
+  const raiz = path.join(__dirname, '..');
+  const schema = fs.readFileSync(path.join(raiz, 'db', 'schema.sql'), 'utf8');
+  const servidor = fs.readFileSync(path.join(raiz, 'server.js'), 'utf8');
+  const termos = fs.readFileSync(path.join(raiz, 'frontend', 'termos.html'), 'utf8');
+  assert.match(schema, /CREATE TABLE IF NOT EXISTS aceites_termos/);
+  assert.match(schema, /aceite_termos_unico/);
+  assert.match(servidor, /TERMOS_VERSION/);
+  assert.match(servidor, /\/api\/legal\/aceite/);
+  assert.match(servidor, /validarAceiteNoCadastro/);
+  assert.match(termos, /Política de Privacidade/);
+  assert.match(termos, /Regras do cliente/);
+  assert.match(termos, /Regras da loja/);
+  assert.match(termos, /Regras do entregador/);
+  for (const arquivo of ['frontend/index.html', 'loja/index.html', 'entregador/index.html']) {
+    const painel = fs.readFileSync(path.join(raiz, arquivo), 'utf8');
+    assert.match(painel, /termos\.html/);
+    assert.match(painel, /aceitou_termos/);
+    assert.match(painel, /aceitou_privacidade/);
+  }
 });

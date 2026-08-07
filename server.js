@@ -3,6 +3,7 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const path = require('path');
+const crypto = require('crypto');
 const {
   databaseReady,
   dbAll,
@@ -14,6 +15,8 @@ const {
 } = require('./database');
 const {
   arredondarDinheiro,
+  calcularFretePorFaixa,
+  calcularGanhoLiquidoEntregador,
   calcularPercentualPromocional,
   calcularTaxaPedidoPequeno,
   calcularFinanceiroPedido,
@@ -32,6 +35,48 @@ function requireEnvironment(name) {
 const JWT_SECRET = requireEnvironment('JWT_SECRET');
 const ADMIN_EMAIL = requireEnvironment('ADMIN_EMAIL');
 const ADMIN_PASSWORD = requireEnvironment('ADMIN_PASSWORD');
+
+const TERMOS_VERSION = '2026-08-04.1';
+const PRIVACIDADE_VERSION = '2026-08-04.1';
+
+function dadosPublicosEmpresa() {
+  const dados = {
+    nome: process.env.EMPRESA_NOME || '',
+    documento: process.env.EMPRESA_DOCUMENTO || '',
+    endereco: process.env.EMPRESA_ENDERECO || '',
+    email_suporte: process.env.EMPRESA_EMAIL_SUPORTE || '',
+    email_privacidade: process.env.EMPRESA_EMAIL_PRIVACIDADE || ''
+  };
+  return {
+    ...dados,
+    identificacao_completa: Object.values(dados).every(valor => String(valor).trim())
+  };
+}
+
+function validarAceiteNoCadastro(body) {
+  return body.aceitou_termos === true && body.aceitou_privacidade === true;
+}
+
+function hashIpRequisicao(req) {
+  const ip = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').split(',')[0].trim();
+  if (!ip) return null;
+  return crypto.createHmac('sha256', JWT_SECRET).update(ip).digest('hex');
+}
+
+async function registrarAceiteTermos(tipoUsuario, usuarioId, req, executor = { run: dbRun }) {
+  await executor.run(`INSERT INTO aceites_termos
+    (tipo_usuario, usuario_id, versao_termos, versao_privacidade, ip_hash, user_agent)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT (tipo_usuario, usuario_id, versao_termos, versao_privacidade) DO NOTHING`,
+  [tipoUsuario, usuarioId, TERMOS_VERSION, PRIVACIDADE_VERSION, hashIpRequisicao(req), String(req.headers['user-agent'] || '').slice(0, 500)]);
+}
+
+async function possuiAceiteAtual(tipoUsuario, usuarioId) {
+  const aceite = await dbGet(`SELECT id FROM aceites_termos
+    WHERE tipo_usuario = ? AND usuario_id = ? AND versao_termos = ? AND versao_privacidade = ?`,
+  [tipoUsuario, usuarioId, TERMOS_VERSION, PRIVACIDADE_VERSION]);
+  return Boolean(aceite);
+}
 
 const FUSO_PLATAFORMA = 'America/Araguaina';
 
@@ -65,10 +110,20 @@ async function obterConfiguracaoFrete() {
   return (await dbGet('SELECT * FROM configuracoes_plataforma WHERE id = 1')) || {
     frete_base: 4,
     valor_km: 1.5,
+    frete_faixa_ate_2: 5.99,
+    frete_faixa_ate_4: 7.99,
+    frete_faixa_ate_6: 10.99,
+    frete_faixa_ate_8: 13.99,
+    distancia_maxima_entrega: 8,
+    ganho_minimo_entregador: 7.5,
+    ganho_km_entregador: 1.5,
+    limite_bonus_entregador_percentual: 15,
+    raio_preferencial_coleta: 3,
+    raio_maximo_coleta: 5,
     fator_rota: 1.2,
     adicional_chuva_percentual: 10,
     adicional_pico_percentual: 5,
-    limite_adicionais_percentual: 15,
+    limite_adicionais_percentual: 10,
     condicao_climatica: 'normal',
     entregas_ativas: 1,
     pedido_minimo: 15,
@@ -90,21 +145,50 @@ async function calcularCotacaoFrete(loja, latitudeEntrega, longitudeEntrega, ago
   }
   const distanciaReta = calcularDistanciaRetaKm(loja.latitude, loja.longitude, latitudeEntrega, longitudeEntrega);
   const distanciaEstimada = Math.max(0.5, distanciaReta * Number(config.fator_rota || 1.2));
-  const taxaBase = arredondarDinheiro(Number(config.frete_base || 0) + distanciaEstimada * Number(config.valor_km || 0));
+  const faixaFrete = calcularFretePorFaixa(distanciaEstimada, config);
+  if (!faixaFrete.disponivel) {
+    throw Object.assign(new Error(`Endereço fora da área de entrega por moto. Limite atual: ${faixaFrete.distanciaMaxima} km da loja.`), { status: 400 });
+  }
+  const taxaBase = faixaFrete.valor;
   const adicionalClima = config.condicao_climatica === 'chuva' ? Number(config.adicional_chuva_percentual || 0) : 0;
   const pico = horarioDePico(agora);
   const adicionalPico = pico ? Number(config.adicional_pico_percentual || 0) : 0;
-  const adicionaisAplicados = Math.min(adicionalClima + adicionalPico, Number(config.limite_adicionais_percentual || 0));
+  const adicionaisAplicados = Math.min(adicionalClima + adicionalPico, Number(config.limite_adicionais_percentual || 0), 10);
   return {
     distancia_km: Math.round(distanciaEstimada * 10) / 10,
     distancia_reta_km: Math.round(distanciaReta * 10) / 10,
     taxa_base: taxaBase,
+    faixa_frete: faixaFrete.faixa,
     adicional_clima_percentual: adicionalClima,
     adicional_pico_percentual: adicionalPico,
     adicional_total_percentual: adicionaisAplicados,
     horario_pico: pico,
     condicao_climatica: config.condicao_climatica,
     valor_frete: arredondarDinheiro(taxaBase * (1 + adicionaisAplicados / 100))
+  };
+}
+
+function calcularOfertaEntregador(pedido, entregador, configuracao) {
+  if (!coordenadaValida(entregador.latitude, entregador.longitude)) {
+    throw Object.assign(new Error('Aguarde o GPS do entregador ficar ativo antes de aceitar'), { status: 400 });
+  }
+  if (!coordenadaValida(pedido.loja_latitude, pedido.loja_longitude)) {
+    throw Object.assign(new Error('A loja ainda não possui localização GPS válida'), { status: 400 });
+  }
+  const coletaReta = calcularDistanciaRetaKm(entregador.latitude, entregador.longitude, pedido.loja_latitude, pedido.loja_longitude);
+  const coletaEstimada = coletaReta * Number(configuracao.fator_rota || 1.2);
+  const adicionalTotal = Number(pedido.adicional_clima_percentual || 0) + Number(pedido.adicional_pico_percentual || 0);
+  const ganho = calcularGanhoLiquidoEntregador({
+    distanciaColetaKm: coletaEstimada,
+    distanciaEntregaKm: Number(pedido.distancia_km || 0),
+    adicionalPercentual: adicionalTotal,
+    configuracao
+  });
+  return {
+    ...ganho,
+    coletaPreferencial: coletaEstimada <= Number(configuracao.raio_preferencial_coleta || 3),
+    coletaPermitida: coletaEstimada <= Number(configuracao.raio_maximo_coleta || 5),
+    margemPlataformaEntrega: arredondarDinheiro(Number(pedido.taxa_entrega || 0) - ganho.valorLiquido)
   };
 }
 
@@ -141,34 +225,36 @@ app.get('/api/health', async (req, res) => {
 });
 
 // ============ MIDDLEWARE ============
-function authLojas(req, res, next) {
+async function autenticarUsuario(req, res, next, tipoEsperado) {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Token não fornecido' });
   try {
     req.usuario = jwt.verify(token, JWT_SECRET);
-    if (req.usuario.tipo !== 'loja') return res.status(403).json({ error: 'Acesso apenas para lojas' });
+    if (req.usuario.tipo !== tipoEsperado) return res.status(403).json({ error: `Acesso apenas para ${tipoEsperado}` });
+    if (!(await possuiAceiteAtual(req.usuario.tipo, req.usuario.id))) {
+      return res.status(428).json({
+        error: 'Leia e aceite os Termos e a Política de Privacidade para continuar',
+        codigo: 'TERMOS_PENDENTES',
+        termos_pendentes: true
+      });
+    }
     next();
-  } catch { res.status(401).json({ error: 'Token inválido' }); }
+  } catch (error) {
+    console.error('Falha de autenticação:', error.message);
+    res.status(401).json({ error: 'Token inválido' });
+  }
+}
+
+function authLojas(req, res, next) {
+  autenticarUsuario(req, res, next, 'loja');
 }
 
 function authCliente(req, res, next) {
-  const token = req.headers.authorization?.split(' ')[1];
-  if (!token) return res.status(401).json({ error: 'Token não fornecido' });
-  try {
-    req.usuario = jwt.verify(token, JWT_SECRET);
-    if (req.usuario.tipo !== 'cliente') return res.status(403).json({ error: 'Acesso apenas para clientes' });
-    next();
-  } catch { res.status(401).json({ error: 'Token inválido' }); }
+  autenticarUsuario(req, res, next, 'cliente');
 }
 
 function authEntregador(req, res, next) {
-  const token = req.headers.authorization?.split(' ')[1];
-  if (!token) return res.status(401).json({ error: 'Token não fornecido' });
-  try {
-    req.usuario = jwt.verify(token, JWT_SECRET);
-    if (req.usuario.tipo !== 'entregador') return res.status(403).json({ error: 'Acesso apenas para entregadores' });
-    next();
-  } catch { res.status(401).json({ error: 'Token inválido' }); }
+  autenticarUsuario(req, res, next, 'entregador');
 }
 
 function authAdmin(req, res, next) {
@@ -181,19 +267,86 @@ function authAdmin(req, res, next) {
   } catch { res.status(401).json({ error: 'Token inválido' }); }
 }
 
+// ============ TERMOS, REGRAS E PRIVACIDADE ============
+app.get('/api/legal/documentos', async (req, res) => {
+  res.json({
+    termos_versao: TERMOS_VERSION,
+    privacidade_versao: PRIVACIDADE_VERSION,
+    empresa: dadosPublicosEmpresa(),
+    links: {
+      termos: '/termos.html#termos',
+      privacidade: '/termos.html#privacidade',
+      cliente: '/termos.html#regras-cliente',
+      loja: '/termos.html#regras-loja',
+      entregador: '/termos.html#regras-entregador'
+    }
+  });
+});
+
+function usuarioDoTokenLegal(req, res) {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) {
+    res.status(401).json({ error: 'Entre na sua conta para registrar o aceite' });
+    return null;
+  }
+  try {
+    const usuario = jwt.verify(token, JWT_SECRET);
+    if (!['cliente', 'loja', 'entregador'].includes(usuario.tipo)) {
+      res.status(403).json({ error: 'Tipo de conta inválido para este aceite' });
+      return null;
+    }
+    return usuario;
+  } catch {
+    res.status(401).json({ error: 'Sessão vencida. Entre novamente.' });
+    return null;
+  }
+}
+
+app.get('/api/legal/aceite', async (req, res) => {
+  const usuario = usuarioDoTokenLegal(req, res);
+  if (!usuario) return;
+  const aceitou = await possuiAceiteAtual(usuario.tipo, usuario.id);
+  res.json({
+    aceitou,
+    termos_pendentes: !aceitou,
+    termos_versao: TERMOS_VERSION,
+    privacidade_versao: PRIVACIDADE_VERSION
+  });
+});
+
+app.post('/api/legal/aceite', async (req, res) => {
+  const usuario = usuarioDoTokenLegal(req, res);
+  if (!usuario) return;
+  if (!validarAceiteNoCadastro(req.body)) {
+    return res.status(400).json({ error: 'Marque as duas confirmações para continuar' });
+  }
+  await registrarAceiteTermos(usuario.tipo, usuario.id, req);
+  res.json({
+    success: true,
+    termos_versao: TERMOS_VERSION,
+    privacidade_versao: PRIVACIDADE_VERSION,
+    aceito_em: new Date().toISOString()
+  });
+});
+
 // ============ LOJAS API ============
 app.post('/api/lojas/cadastro', async (req, res) => {
   const { nome, email, senha, telefone, endereco, bairro, latitude, longitude, descricao, categorias, taxa_entrega_km, chave_pix, plano, tempo_entrega_min } = req.body;
   try {
     if (!nome || !email || !senha) return res.status(400).json({ error: 'Nome, email e senha são obrigatórios' });
+    if (!validarAceiteNoCadastro(req.body)) return res.status(400).json({ error: 'Leia e aceite os Termos e a Política de Privacidade' });
     const planoEscolhido = normalizarPlanoLoja(plano);
     const hash = bcrypt.hashSync(senha, 10);
     const taxaKm = Number(taxa_entrega_km || 2);
     if (!coordenadaValida(latitude, longitude)) return res.status(400).json({ error: 'Use o botão de GPS para marcar a localização da loja' });
-    const result = await dbRun('INSERT INTO lojas (nome, email, senha, telefone, endereco, bairro, latitude, longitude, descricao, categorias, taxa_entrega_km, chave_pix, plano, comissao_percentual, tempo_entrega_min) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', 
-      [nome, email, hash, telefone, endereco, bairro, Number(latitude), Number(longitude), descricao, categorias, taxaKm, chave_pix || null, planoEscolhido, 5, tempo_entrega_min || '30-60 min']);
+    const result = await dbTransaction(async tx => {
+      const insercao = await tx.run('INSERT INTO lojas (nome, email, senha, telefone, endereco, bairro, latitude, longitude, descricao, categorias, taxa_entrega_km, chave_pix, plano, comissao_percentual, tempo_entrega_min) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [nome, email, hash, telefone, endereco, bairro, Number(latitude), Number(longitude), descricao, categorias, taxaKm, chave_pix || null, planoEscolhido, 5, tempo_entrega_min || '30-60 min']);
+      await registrarAceiteTermos('loja', insercao.lastID, req, tx);
+      return insercao;
+    });
     const token = jwt.sign({ id: result.lastID, tipo: 'loja' }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ success: true, id: result.lastID, token, loja: { id: result.lastID, nome, email, plano: planoEscolhido, comissao_percentual: 5, taxa_entrega_km: taxaKm, chave_pix: chave_pix || null, latitude: Number(latitude), longitude: Number(longitude), inicio_promocao: null } });
+    res.json({ success: true, id: result.lastID, token, termos_pendentes: false, loja: { id: result.lastID, nome, email, plano: planoEscolhido, comissao_percentual: 5, taxa_entrega_km: taxaKm, chave_pix: chave_pix || null, latitude: Number(latitude), longitude: Number(longitude), inicio_promocao: null } });
   } catch (e) {
     if (isUniqueViolation(e)) return res.status(400).json({ error: 'Email já cadastrado' });
     console.error('Erro ao cadastrar loja:', e);
@@ -209,7 +362,7 @@ app.post('/api/lojas/login', async (req, res) => {
   loja.comissao_percentual = calcularPercentualPromocional(loja.inicio_promocao);
   await dbRun('UPDATE lojas SET comissao_percentual = ? WHERE id = ?', [loja.comissao_percentual, loja.id]);
   const token = jwt.sign({ id: loja.id, tipo: 'loja' }, JWT_SECRET, { expiresIn: '7d' });
-  res.json({ success: true, token, loja: { id: loja.id, nome: loja.nome, email: loja.email, logo: loja.logo, aberto: loja.aberto, taxa_entrega_km: loja.taxa_entrega_km, chave_pix: loja.chave_pix, plano: normalizarPlanoLoja(loja.plano), comissao_percentual: Number(loja.comissao_percentual), inicio_promocao: loja.inicio_promocao, latitude: loja.latitude, longitude: loja.longitude } });
+  res.json({ success: true, token, termos_pendentes: !(await possuiAceiteAtual('loja', loja.id)), loja: { id: loja.id, nome: loja.nome, email: loja.email, logo: loja.logo, aberto: loja.aberto, taxa_entrega_km: loja.taxa_entrega_km, chave_pix: loja.chave_pix, plano: normalizarPlanoLoja(loja.plano), comissao_percentual: Number(loja.comissao_percentual), inicio_promocao: loja.inicio_promocao, latitude: loja.latitude, longitude: loja.longitude } });
 });
 
 app.get('/api/lojas', async (req, res) => {
@@ -350,10 +503,16 @@ app.get('/api/produtos', async (req, res) => {
 app.post('/api/clientes/cadastro', async (req, res) => {
   const { nome, email, senha, telefone, endereco_padrao, bairro, latitude, longitude } = req.body;
   try {
+    if (!nome || !email || !senha) return res.status(400).json({ error: 'Nome, email e senha são obrigatórios' });
+    if (!validarAceiteNoCadastro(req.body)) return res.status(400).json({ error: 'Leia e aceite os Termos e a Política de Privacidade' });
     const hash = bcrypt.hashSync(senha, 10);
-    const result = await dbRun('INSERT INTO clientes (nome, email, senha, telefone, endereco_padrao, bairro, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [nome, email, hash, telefone, endereco_padrao, bairro, latitude, longitude]);
+    const result = await dbTransaction(async tx => {
+      const insercao = await tx.run('INSERT INTO clientes (nome, email, senha, telefone, endereco_padrao, bairro, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [nome, email, hash, telefone, endereco_padrao, bairro, latitude, longitude]);
+      await registrarAceiteTermos('cliente', insercao.lastID, req, tx);
+      return insercao;
+    });
     const token = jwt.sign({ id: result.lastID, tipo: 'cliente' }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ success: true, token, cliente: { id: result.lastID, nome, email, telefone, endereco_padrao, bairro, latitude: latitude || null, longitude: longitude || null } });
+    res.json({ success: true, token, termos_pendentes: false, cliente: { id: result.lastID, nome, email, telefone, endereco_padrao, bairro, latitude: latitude || null, longitude: longitude || null } });
   } catch (e) {
     if (isUniqueViolation(e)) return res.status(400).json({ error: 'Email já cadastrado' });
     console.error('Erro ao cadastrar cliente:', e);
@@ -367,7 +526,7 @@ app.post('/api/clientes/login', async (req, res) => {
   if (!cliente) return res.status(401).json({ error: 'Email não encontrado' });
   if (!bcrypt.compareSync(senha, cliente.senha)) return res.status(401).json({ error: 'Senha incorreta' });
   const token = jwt.sign({ id: cliente.id, tipo: 'cliente' }, JWT_SECRET, { expiresIn: '7d' });
-  res.json({ success: true, token, cliente: { id: cliente.id, nome: cliente.nome, email: cliente.email, telefone: cliente.telefone, endereco_padrao: cliente.endereco_padrao, bairro: cliente.bairro, latitude: cliente.latitude, longitude: cliente.longitude } });
+  res.json({ success: true, token, termos_pendentes: !(await possuiAceiteAtual('cliente', cliente.id)), cliente: { id: cliente.id, nome: cliente.nome, email: cliente.email, telefone: cliente.telefone, endereco_padrao: cliente.endereco_padrao, bairro: cliente.bairro, latitude: cliente.latitude, longitude: cliente.longitude } });
 });
 
 app.get('/api/clientes/:id', authCliente, async (req, res) => {
@@ -397,12 +556,18 @@ app.put('/api/clientes/:id', authCliente, async (req, res) => {
 app.post('/api/entregadores/cadastro', async (req, res) => {
   const { nome, cpf, email, senha, telefone, veiculo, placa, chave_pix } = req.body;
   try {
+    if (!nome || !email || !senha) return res.status(400).json({ error: 'Nome, email e senha são obrigatórios' });
+    if (!validarAceiteNoCadastro(req.body)) return res.status(400).json({ error: 'Leia e aceite os Termos e a Política de Privacidade' });
+    if (req.body.declarou_requisitos_profissionais !== true) return res.status(400).json({ error: 'Confirme que atende aos requisitos legais e de segurança da atividade' });
     const hash = bcrypt.hashSync(senha, 10);
-    const result = await dbRun('INSERT INTO entregadores (nome, cpf, email, senha, telefone, veiculo, placa, chave_pix) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [nome, cpf, email, hash, telefone, veiculo, placa, chave_pix || null]);
+    const result = await dbTransaction(async tx => {
+      const insercao = await tx.run('INSERT INTO entregadores (nome, cpf, email, senha, telefone, veiculo, placa, chave_pix) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [nome, cpf, email, hash, telefone, veiculo, placa, chave_pix || null]);
+      await tx.run('INSERT INTO saldo_entregadores (entregador_id, saldo) VALUES (?, 0) ON CONFLICT (entregador_id) DO NOTHING', [insercao.lastID]);
+      await registrarAceiteTermos('entregador', insercao.lastID, req, tx);
+      return insercao;
+    });
     const token = jwt.sign({ id: result.lastID, tipo: 'entregador' }, JWT_SECRET, { expiresIn: '7d' });
-    // Criar saldo inicial
-    await dbRun('INSERT INTO saldo_entregadores (entregador_id, saldo) VALUES (?, 0) ON CONFLICT (entregador_id) DO NOTHING', [result.lastID]);
-    res.json({ success: true, token, entregador: { id: result.lastID, nome, email, comissao_percentual: 5, inicio_promocao: null } });
+    res.json({ success: true, token, termos_pendentes: false, entregador: { id: result.lastID, nome, email, comissao_percentual: 5, inicio_promocao: null } });
   } catch (e) {
     if (isUniqueViolation(e)) return res.status(400).json({ error: 'CPF ou email já cadastrado' });
     console.error('Erro ao cadastrar entregador:', e);
@@ -418,7 +583,7 @@ app.post('/api/entregadores/login', async (req, res) => {
   const token = jwt.sign({ id: entregador.id, tipo: 'entregador' }, JWT_SECRET, { expiresIn: '7d' });
   const comissaoPercentual = calcularPercentualPromocional(entregador.inicio_promocao);
   await dbRun('UPDATE entregadores SET comissao_percentual = ? WHERE id = ?', [comissaoPercentual, entregador.id]);
-  res.json({ success: true, token, entregador: { id: entregador.id, nome: entregador.nome, email: entregador.email, veiculo: entregador.veiculo, disponivel: entregador.disponivel, chave_pix: entregador.chave_pix, comissao_percentual: comissaoPercentual, inicio_promocao: entregador.inicio_promocao } });
+  res.json({ success: true, token, termos_pendentes: !(await possuiAceiteAtual('entregador', entregador.id)), entregador: { id: entregador.id, nome: entregador.nome, email: entregador.email, veiculo: entregador.veiculo, disponivel: entregador.disponivel, chave_pix: entregador.chave_pix, comissao_percentual: comissaoPercentual, inicio_promocao: entregador.inicio_promocao } });
 });
 
 app.get('/api/entregadores/disponiveis', async (req, res) => {
@@ -546,7 +711,9 @@ app.post('/api/pedidos', authCliente, async (req, res) => {
       ? await calcularCotacaoFrete(loja, latitude_entrega, longitude_entrega)
       : { valor_frete: 0, distancia_km: 0, taxa_base: 0, adicional_clima_percentual: 0, adicional_pico_percentual: 0 };
     const comissaoLoja = calcularPercentualPromocional(loja.inicio_promocao);
-    const comissaoEntrega = normalizarPlanoLoja(loja.plano) === 'entrega_obraexpress' && tipo_entrega === 'entrega' ? 5 : 0;
+    // O ganho do entregador é calculado quando ele aceita, usando a rota completa
+    // (posição atual -> loja -> cliente). Até lá o pedido não reserva repasse.
+    const comissaoEntrega = 0;
     const financeiro = calcularFinanceiroPedido({
       totalProdutos: carrinho.totalProdutos,
       taxaEntrega: cotacao.valor_frete,
@@ -554,7 +721,7 @@ app.post('/api/pedidos', authCliente, async (req, res) => {
       tipoEntrega: tipo_entrega,
       planoLoja: loja.plano,
       comissaoPercentual: comissaoLoja,
-      percentualEntregador: 100 - comissaoEntrega
+      percentualEntregador: 0
     });
     const codigo = Math.random().toString(36).substring(2, 8).toUpperCase();
 
@@ -587,7 +754,8 @@ app.post('/api/pedidos', authCliente, async (req, res) => {
       total_final: financeiro.totalFinal,
       distancia_km: cotacao.distancia_km,
       adicional_clima_percentual: cotacao.adicional_clima_percentual,
-      adicional_pico_percentual: cotacao.adicional_pico_percentual
+      adicional_pico_percentual: cotacao.adicional_pico_percentual,
+      faixa_frete: cotacao.faixa_frete || null
     });
   } catch (error) {
     if (error.status) return res.status(error.status).json({ error: error.message });
@@ -687,8 +855,11 @@ app.get('/api/pedidos/entregador/:entregador_id', authEntregador, async (req, re
 
 // ENTREGADOR: Ver pedidos disponíveis (status = separado, precisa de entrega)
 app.get('/api/pedidos/disponiveis', authEntregador, async (req, res) => {
-  const entregador = await dbGet('SELECT inicio_promocao FROM entregadores WHERE id = ?', [req.usuario.id]);
-  const comissaoEntrega = calcularPercentualPromocional(entregador?.inicio_promocao);
+  const entregador = await dbGet('SELECT latitude, longitude FROM entregadores WHERE id = ?', [req.usuario.id]);
+  if (!coordenadaValida(entregador?.latitude, entregador?.longitude)) {
+    return res.json({ pedidos: [], gps_pendente: true, mensagem: 'Aguardando uma localização GPS válida' });
+  }
+  const configuracao = await obterConfiguracaoFrete();
   const pedidos = await dbAll(`SELECT p.*, l.nome as loja_nome, l.endereco as loja_endereco, 
     l.latitude as loja_latitude, l.longitude as loja_longitude, l.telefone as loja_telefone, l.chave_pix,
     c.nome as cliente_nome, c.telefone as cliente_telefone, COALESCE(p.endereco_entrega, c.endereco_padrao) as cliente_endereco,
@@ -700,27 +871,56 @@ app.get('/api/pedidos/disponiveis', authEntregador, async (req, res) => {
     WHERE p.status = 'separado' AND p.tipo_entrega = 'entrega'
       AND p.plano_loja = 'entrega_obraexpress' AND p.entregador_id IS NULL 
     ORDER BY p.data_pedido ASC`);
-  res.json({ pedidos: pedidos.map(pedido => ({
-    ...pedido,
-    comissao_entrega_percentual: comissaoEntrega,
-    valor_motoboy: arredondarDinheiro(Number(pedido.taxa_entrega || 0) * (100 - comissaoEntrega) / 100)
-  })) });
+  const ofertas = pedidos.map(pedido => {
+    const oferta = calcularOfertaEntregador(pedido, entregador, configuracao);
+    return {
+      ...pedido,
+      valor_motoboy: oferta.valorLiquido,
+      distancia_coleta_km: oferta.distanciaColetaKm,
+      distancia_total_entrega_km: oferta.distanciaTotalKm,
+      bonus_entregador_percentual: oferta.bonusPercentual,
+      coleta_preferencial: oferta.coletaPreferencial
+    };
+  }).filter(pedido => Number(pedido.distancia_coleta_km) <= Number(configuracao.raio_maximo_coleta || 5))
+    .sort((a, b) => Number(b.coleta_preferencial) - Number(a.coleta_preferencial) || Number(a.distancia_coleta_km) - Number(b.distancia_coleta_km));
+  res.json({ pedidos: ofertas, raio_maximo_coleta: Number(configuracao.raio_maximo_coleta || 5) });
 });
 
 // ENTREGADOR: Aceitar pedido
 app.put('/api/pedidos/:id/aceitar', authEntregador, async (req, res) => {
-  const entregador = await dbGet('SELECT inicio_promocao FROM entregadores WHERE id = ?', [req.usuario.id]);
-  const comissaoEntrega = calcularPercentualPromocional(entregador?.inicio_promocao);
-  const atualizacao = await dbRun(`UPDATE pedidos SET entregador_id = ?, status = ?,
-    comissao_entrega_percentual = ?,
-    valor_motoboy = ROUND((taxa_entrega::numeric * ? / 100), 2),
-    valor_plataforma = ROUND((taxa_entrega::numeric * ? / 100), 2)
-    WHERE id = ? AND status = 'separado' AND entregador_id IS NULL AND plano_loja = 'entrega_obraexpress'`,
-    [req.usuario.id, 'em_coleta', comissaoEntrega, 100 - comissaoEntrega, comissaoEntrega, req.params.id]);
-  if (!atualizacao.changes) return res.status(409).json({ error: 'Essa entrega não está mais disponível' });
-  await dbRun('UPDATE entregadores SET disponivel = 0 WHERE id = ?', [req.usuario.id]);
-  
-  res.json({ success: true, message: 'Pedido aceito! Vá até a loja para buscar.', comissao_percentual: comissaoEntrega });
+  try {
+    const configuracao = await obterConfiguracaoFrete();
+    const resultado = await dbTransaction(async tx => {
+      const entregador = await tx.get('SELECT id, latitude, longitude FROM entregadores WHERE id = ? FOR UPDATE', [req.usuario.id]);
+      const pedido = await tx.get(`SELECT p.*, l.latitude AS loja_latitude, l.longitude AS loja_longitude
+        FROM pedidos p JOIN lojas l ON l.id = p.loja_id WHERE p.id = ? FOR UPDATE`, [req.params.id]);
+      if (!pedido || pedido.status !== 'separado' || pedido.entregador_id || pedido.plano_loja !== 'entrega_obraexpress') {
+        throw Object.assign(new Error('Essa entrega não está mais disponível'), { status: 409 });
+      }
+      const oferta = calcularOfertaEntregador(pedido, entregador, configuracao);
+      if (!oferta.coletaPermitida) {
+        throw Object.assign(new Error(`Você está além do raio de coleta de ${Number(configuracao.raio_maximo_coleta || 5)} km`), { status: 409 });
+      }
+      await tx.run(`UPDATE pedidos SET entregador_id = ?, status = 'em_coleta',
+        comissao_entrega_percentual = 0, valor_motoboy = ?, valor_plataforma = ?,
+        distancia_coleta_km = ?, distancia_total_entrega_km = ? WHERE id = ?`,
+      [req.usuario.id, oferta.valorLiquido, oferta.margemPlataformaEntrega,
+        oferta.distanciaColetaKm, oferta.distanciaTotalKm, pedido.id]);
+      await tx.run('UPDATE entregadores SET disponivel = 0 WHERE id = ?', [req.usuario.id]);
+      return oferta;
+    });
+    res.json({
+      success: true,
+      message: 'Pedido aceito! Vá até a loja para buscar.',
+      valor_liquido: resultado.valorLiquido,
+      distancia_total_km: resultado.distanciaTotalKm,
+      bonus_percentual: resultado.bonusPercentual
+    });
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    console.error('Erro ao aceitar entrega:', error);
+    res.status(500).json({ error: 'Não foi possível aceitar a entrega' });
+  }
 });
 
 // ENTREGADOR: Recusar pedido (volta pra lista)
@@ -729,8 +929,10 @@ app.put('/api/pedidos/:id/recusar', authEntregador, async (req, res) => {
   if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado' });
   if (pedido.entregador_id != req.usuario.id) return res.status(403).json({ error: 'Você não pode recusar um pedido que não é seu' });
   
-  await dbRun('UPDATE pedidos SET entregador_id = NULL, status = ? WHERE id = ?', 
-    ['separado', req.params.id]);
+  await dbRun(`UPDATE pedidos SET entregador_id = NULL, status = ?, valor_motoboy = 0,
+    valor_plataforma = taxa_entrega, distancia_coleta_km = 0,
+    distancia_total_entrega_km = distancia_km WHERE id = ?`,
+  ['separado', req.params.id]);
   await dbRun('UPDATE entregadores SET disponivel = 1 WHERE id = ?', [req.usuario.id]);
   
   res.json({ success: true, message: 'Pedido recusado. Voltou para a lista de disponíveis.' });
@@ -772,7 +974,10 @@ async function registrarRepasseFinanceiro(tx, pedido, entregadorId = null) {
   }
   if (valorPlataformaEntrega > 0) {
     await tx.run('INSERT INTO saldo_plataforma (descricao, valor, tipo, pedido_id) VALUES (?, ?, ?, ?)',
-      [`Receita da entrega — pedido #${pedido.id}`, valorPlataformaEntrega, 'credito', pedido.id]);
+      [`Margem positiva da entrega — pedido #${pedido.id}`, valorPlataformaEntrega, 'credito', pedido.id]);
+  } else if (valorPlataformaEntrega < 0) {
+    await tx.run('INSERT INTO saldo_plataforma (descricao, valor, tipo, pedido_id) VALUES (?, ?, ?, ?)',
+      [`Complemento pago ao entregador — pedido #${pedido.id}`, Math.abs(valorPlataformaEntrega), 'debito', pedido.id]);
   }
   if (taxaPedidoPequeno > 0) {
     await tx.run('INSERT INTO saldo_plataforma (descricao, valor, tipo, pedido_id) VALUES (?, ?, ?, ?)',
@@ -785,7 +990,7 @@ async function registrarRepasseFinanceiro(tx, pedido, entregadorId = null) {
       WHERE entregador_id = ?`, [valorMotoboy, valorMotoboy, entregadorId]);
     await tx.run('UPDATE entregadores SET total_entregas = total_entregas + 1, disponivel = 1 WHERE id = ?', [entregadorId]);
     await tx.run(`UPDATE entregadores SET inicio_promocao = COALESCE(inicio_promocao, CURRENT_TIMESTAMP),
-      comissao_percentual = ? WHERE id = ?`, [Number(pedido.comissao_entrega_percentual || 5), entregadorId]);
+      comissao_percentual = ? WHERE id = ?`, [Number(pedido.comissao_entrega_percentual ?? 0), entregadorId]);
   }
 
   await tx.run(`UPDATE lojas SET inicio_promocao = COALESCE(inicio_promocao, CURRENT_TIMESTAMP),
@@ -943,10 +1148,20 @@ app.put('/api/admin/configuracoes-entrega', authAdmin, async (req, res) => {
   const limites = {
     frete_base: [0, 100],
     valor_km: [0, 100],
+    frete_faixa_ate_2: [0, 100],
+    frete_faixa_ate_4: [0, 100],
+    frete_faixa_ate_6: [0, 100],
+    frete_faixa_ate_8: [0, 100],
+    distancia_maxima_entrega: [1, 30],
+    ganho_minimo_entregador: [0, 100],
+    ganho_km_entregador: [0, 100],
+    limite_bonus_entregador_percentual: [0, 100],
+    raio_preferencial_coleta: [0, 30],
+    raio_maximo_coleta: [0, 30],
     fator_rota: [1, 3],
     adicional_chuva_percentual: [0, 100],
     adicional_pico_percentual: [0, 100],
-    limite_adicionais_percentual: [0, 100],
+    limite_adicionais_percentual: [0, 10],
     pedido_minimo: [0, 1000],
     limite_pedido_pequeno: [0, 1000],
     taxa_pedido_pequeno: [0, 100]
@@ -964,6 +1179,14 @@ app.put('/api/admin/configuracoes-entrega', authAdmin, async (req, res) => {
   const limitePedidoPequeno = req.body.limite_pedido_pequeno === undefined ? Number(configuracaoAtual.limite_pedido_pequeno) : Number(req.body.limite_pedido_pequeno);
   if (limitePedidoPequeno < pedidoMinimo) {
     return res.status(400).json({ error: 'O limite do pedido pequeno não pode ser menor que o pedido mínimo' });
+  }
+  const valorFinal = campo => req.body[campo] === undefined ? Number(configuracaoAtual[campo]) : Number(req.body[campo]);
+  const faixas = ['frete_faixa_ate_2', 'frete_faixa_ate_4', 'frete_faixa_ate_6', 'frete_faixa_ate_8'].map(valorFinal);
+  if (faixas.some((valor, indice) => indice > 0 && valor < faixas[indice - 1])) {
+    return res.status(400).json({ error: 'As faixas de frete precisam crescer junto com a distância' });
+  }
+  if (valorFinal('raio_maximo_coleta') < valorFinal('raio_preferencial_coleta')) {
+    return res.status(400).json({ error: 'O raio máximo de coleta não pode ser menor que o raio preferencial' });
   }
   if (req.body.condicao_climatica !== undefined) {
     if (!['normal', 'chuva', 'perigoso'].includes(req.body.condicao_climatica)) return res.status(400).json({ error: 'Condição climática inválida' });
@@ -983,6 +1206,7 @@ app.put('/api/admin/configuracoes-entrega', authAdmin, async (req, res) => {
 app.delete('/api/clientes/:id', authCliente, async (req, res) => {
   if (req.usuario.id != req.params.id) return res.status(403).json({ error: 'Permissão negada' });
   try {
+    await dbRun("DELETE FROM aceites_termos WHERE tipo_usuario = 'cliente' AND usuario_id = ?", [req.params.id]);
     await dbRun('DELETE FROM avaliacoes WHERE cliente_id = ?', [req.params.id]);
     await dbRun('DELETE FROM pedidos WHERE cliente_id = ?', [req.params.id]);
     await dbRun('DELETE FROM clientes WHERE id = ?', [req.params.id]);
@@ -993,6 +1217,7 @@ app.delete('/api/clientes/:id', authCliente, async (req, res) => {
 app.delete('/api/entregadores/:id', authEntregador, async (req, res) => {
   if (req.usuario.id != req.params.id) return res.status(403).json({ error: 'Permissão negada' });
   try {
+    await dbRun("DELETE FROM aceites_termos WHERE tipo_usuario = 'entregador' AND usuario_id = ?", [req.params.id]);
     await dbRun('DELETE FROM avaliacoes WHERE entregador_id = ?', [req.params.id]);
     await dbRun('DELETE FROM saldo_entregadores WHERE entregador_id = ?', [req.params.id]);
     await dbRun('UPDATE pedidos SET entregador_id = NULL WHERE entregador_id = ?', [req.params.id]);
@@ -1004,6 +1229,7 @@ app.delete('/api/entregadores/:id', authEntregador, async (req, res) => {
 app.delete('/api/lojas/:id', authLojas, async (req, res) => {
   if (req.usuario.id != req.params.id) return res.status(403).json({ error: 'Permissão negada' });
   try {
+    await dbRun("DELETE FROM aceites_termos WHERE tipo_usuario = 'loja' AND usuario_id = ?", [req.params.id]);
     const pedidos = await dbAll('SELECT id FROM pedidos WHERE loja_id = ?', [req.params.id]);
     for (const p of pedidos) await dbRun('DELETE FROM avaliacoes WHERE pedido_id = ?', [p.id]);
     await dbRun('DELETE FROM pedidos WHERE loja_id = ?', [req.params.id]);
@@ -1017,7 +1243,7 @@ app.delete('/api/lojas/:id', authLojas, async (req, res) => {
 app.post('/api/admin/limpar-dados-teste', authAdmin, async (req, res) => {
   try {
     for (const sql of [
-      'DELETE FROM avaliacoes', 'DELETE FROM saldo_plataforma',
+      'DELETE FROM aceites_termos', 'DELETE FROM avaliacoes', 'DELETE FROM saldo_plataforma',
       'DELETE FROM movimentacoes_lojas', 'DELETE FROM saldo_lojas',
       'DELETE FROM saldo_entregadores', 'DELETE FROM pedidos',
       'DELETE FROM produtos', 'DELETE FROM lojas',
@@ -1033,7 +1259,7 @@ app.get('/api/admin/dashboard', authAdmin, async (req, res) => {
   const totalClientes = await dbGet('SELECT COUNT(*) as total FROM clientes');
   const pedidosHoje = await dbGet("SELECT COUNT(*) as total FROM pedidos WHERE (data_pedido::timestamptz AT TIME ZONE 'America/Araguaina')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'America/Araguaina')::date");
   const pedidosPendentes = await dbGet("SELECT COUNT(*) as total FROM pedidos WHERE status NOT IN ('entregue', 'cancelado')");
-  const faturamento = await dbGet('SELECT COALESCE(SUM(valor), 0) as total FROM saldo_plataforma WHERE tipo = ?', ['credito']);
+  const faturamento = await dbGet("SELECT COALESCE(SUM(CASE WHEN tipo = 'credito' THEN valor ELSE -valor END), 0) as total FROM saldo_plataforma");
   const ultimosPedidos = await dbAll(`SELECT p.id, p.status, p.total_final, p.data_pedido, 
     l.nome as loja_nome, c.nome as cliente_nome, e.nome as entregador_nome
     FROM pedidos p 
@@ -1083,7 +1309,7 @@ app.get('/api/admin/financeiro', authAdmin, async (req, res) => {
     FROM saldo_lojas sl
     JOIN lojas l ON sl.loja_id = l.id
     ORDER BY sl.saldo DESC`);
-  const totalPlataforma = await dbGet('SELECT COALESCE(SUM(valor), 0) as total FROM saldo_plataforma WHERE tipo = ?', ['credito']);
+  const totalPlataforma = await dbGet("SELECT COALESCE(SUM(CASE WHEN tipo = 'credito' THEN valor ELSE -valor END), 0) as total FROM saldo_plataforma");
   res.json({
     saldoPlataforma,
     saldoEntregadores: saldoEntregadores.map(item => ({

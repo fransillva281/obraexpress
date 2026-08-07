@@ -96,6 +96,8 @@ CREATE TABLE IF NOT EXISTS pedidos (
   latitude_entrega DOUBLE PRECISION,
   longitude_entrega DOUBLE PRECISION,
   distancia_km DOUBLE PRECISION DEFAULT 0,
+  distancia_coleta_km DOUBLE PRECISION DEFAULT 0,
+  distancia_total_entrega_km DOUBLE PRECISION DEFAULT 0,
   forma_pagamento TEXT DEFAULT 'pix',
   observacao TEXT,
   status TEXT DEFAULT 'aguardando_confirmacao',
@@ -172,6 +174,24 @@ CREATE TABLE IF NOT EXISTS avaliacoes (
   data TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Registro auditável do aceite. O IP não é guardado em texto: somente um hash
+-- protegido, suficiente para reduzir fraude sem expor o endereço original.
+CREATE TABLE IF NOT EXISTS aceites_termos (
+  id SERIAL PRIMARY KEY,
+  tipo_usuario TEXT NOT NULL CHECK (tipo_usuario IN ('cliente', 'loja', 'entregador')),
+  usuario_id INTEGER NOT NULL,
+  versao_termos TEXT NOT NULL,
+  versao_privacidade TEXT NOT NULL,
+  aceito_em TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  ip_hash TEXT,
+  user_agent TEXT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS aceite_termos_unico
+  ON aceites_termos (tipo_usuario, usuario_id, versao_termos, versao_privacidade);
+CREATE INDEX IF NOT EXISTS idx_aceites_usuario
+  ON aceites_termos (tipo_usuario, usuario_id, aceito_em DESC);
+
 CREATE TABLE IF NOT EXISTS categorias (
   id SERIAL PRIMARY KEY,
   nome TEXT NOT NULL,
@@ -184,10 +204,20 @@ CREATE TABLE IF NOT EXISTS configuracoes_plataforma (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   frete_base NUMERIC(12,2) NOT NULL DEFAULT 4.00,
   valor_km NUMERIC(12,2) NOT NULL DEFAULT 1.50,
+  frete_faixa_ate_2 NUMERIC(12,2) NOT NULL DEFAULT 5.99,
+  frete_faixa_ate_4 NUMERIC(12,2) NOT NULL DEFAULT 7.99,
+  frete_faixa_ate_6 NUMERIC(12,2) NOT NULL DEFAULT 10.99,
+  frete_faixa_ate_8 NUMERIC(12,2) NOT NULL DEFAULT 13.99,
+  distancia_maxima_entrega NUMERIC(6,2) NOT NULL DEFAULT 8.00,
+  ganho_minimo_entregador NUMERIC(12,2) NOT NULL DEFAULT 7.50,
+  ganho_km_entregador NUMERIC(12,2) NOT NULL DEFAULT 1.50,
+  limite_bonus_entregador_percentual NUMERIC(5,2) NOT NULL DEFAULT 15.00,
+  raio_preferencial_coleta NUMERIC(6,2) NOT NULL DEFAULT 3.00,
+  raio_maximo_coleta NUMERIC(6,2) NOT NULL DEFAULT 5.00,
   fator_rota NUMERIC(5,2) NOT NULL DEFAULT 1.20,
   adicional_chuva_percentual NUMERIC(5,2) NOT NULL DEFAULT 10.00,
   adicional_pico_percentual NUMERIC(5,2) NOT NULL DEFAULT 5.00,
-  limite_adicionais_percentual NUMERIC(5,2) NOT NULL DEFAULT 15.00,
+  limite_adicionais_percentual NUMERIC(5,2) NOT NULL DEFAULT 10.00,
   condicao_climatica TEXT NOT NULL DEFAULT 'normal',
   entregas_ativas INTEGER NOT NULL DEFAULT 1,
   pedido_minimo NUMERIC(12,2) NOT NULL DEFAULT 15.00,
@@ -225,6 +255,8 @@ ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS valor_comissao_loja NUMERIC(12,2) D
 ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS valor_liquido_loja NUMERIC(12,2) DEFAULT 0;
 ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS repasse_processado INTEGER DEFAULT 0;
 ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS taxa_pedido_pequeno NUMERIC(12,2) DEFAULT 0;
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS distancia_coleta_km DOUBLE PRECISION DEFAULT 0;
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS distancia_total_entrega_km DOUBLE PRECISION DEFAULT 0;
 ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS pedido_minimo_aplicado NUMERIC(12,2) DEFAULT 15.00;
 ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS limite_pedido_pequeno_aplicado NUMERIC(12,2) DEFAULT 25.00;
 ALTER TABLE pedidos ALTER COLUMN status SET DEFAULT 'aguardando_confirmacao';
@@ -232,6 +264,20 @@ ALTER TABLE pedidos ALTER COLUMN status SET DEFAULT 'aguardando_confirmacao';
 ALTER TABLE configuracoes_plataforma ADD COLUMN IF NOT EXISTS pedido_minimo NUMERIC(12,2) NOT NULL DEFAULT 15.00;
 ALTER TABLE configuracoes_plataforma ADD COLUMN IF NOT EXISTS limite_pedido_pequeno NUMERIC(12,2) NOT NULL DEFAULT 25.00;
 ALTER TABLE configuracoes_plataforma ADD COLUMN IF NOT EXISTS taxa_pedido_pequeno NUMERIC(12,2) NOT NULL DEFAULT 1.99;
+ALTER TABLE configuracoes_plataforma ADD COLUMN IF NOT EXISTS frete_faixa_ate_2 NUMERIC(12,2) NOT NULL DEFAULT 5.99;
+ALTER TABLE configuracoes_plataforma ADD COLUMN IF NOT EXISTS frete_faixa_ate_4 NUMERIC(12,2) NOT NULL DEFAULT 7.99;
+ALTER TABLE configuracoes_plataforma ADD COLUMN IF NOT EXISTS frete_faixa_ate_6 NUMERIC(12,2) NOT NULL DEFAULT 10.99;
+ALTER TABLE configuracoes_plataforma ADD COLUMN IF NOT EXISTS frete_faixa_ate_8 NUMERIC(12,2) NOT NULL DEFAULT 13.99;
+ALTER TABLE configuracoes_plataforma ADD COLUMN IF NOT EXISTS distancia_maxima_entrega NUMERIC(6,2) NOT NULL DEFAULT 8.00;
+ALTER TABLE configuracoes_plataforma ADD COLUMN IF NOT EXISTS ganho_minimo_entregador NUMERIC(12,2) NOT NULL DEFAULT 7.50;
+ALTER TABLE configuracoes_plataforma ADD COLUMN IF NOT EXISTS ganho_km_entregador NUMERIC(12,2) NOT NULL DEFAULT 1.50;
+ALTER TABLE configuracoes_plataforma ADD COLUMN IF NOT EXISTS limite_bonus_entregador_percentual NUMERIC(5,2) NOT NULL DEFAULT 15.00;
+ALTER TABLE configuracoes_plataforma ADD COLUMN IF NOT EXISTS raio_preferencial_coleta NUMERIC(6,2) NOT NULL DEFAULT 3.00;
+ALTER TABLE configuracoes_plataforma ADD COLUMN IF NOT EXISTS raio_maximo_coleta NUMERIC(6,2) NOT NULL DEFAULT 5.00;
+
+UPDATE configuracoes_plataforma
+SET limite_adicionais_percentual = 10.00, atualizado_em = CURRENT_TIMESTAMP
+WHERE id = 1 AND limite_adicionais_percentual = 15.00;
 
 -- A instalação antiga usava um frete mais alto. Apenas a configuração padrão
 -- antiga é migrada; ajustes personalizados feitos pelo administrador são preservados.
@@ -240,7 +286,7 @@ SET frete_base = 4.00,
     valor_km = 1.50,
     adicional_chuva_percentual = 10.00,
     adicional_pico_percentual = 5.00,
-    limite_adicionais_percentual = 15.00,
+    limite_adicionais_percentual = 10.00,
     atualizado_em = CURRENT_TIMESTAMP
 WHERE id = 1
   AND frete_base = 5.00

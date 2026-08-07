@@ -92,7 +92,7 @@ body{background:var(--bg);color:var(--texto)}
         <div class="stat-item"><div class="num" id="stat-clientes">0</div><div class="label">👤 Clientes</div></div>
         <div class="stat-item"><div class="num" id="stat-pedidos-hoje">0</div><div class="label">📦 Pedidos Hoje</div></div>
         <div class="stat-item"><div class="num" id="stat-pendentes">0</div><div class="label">⏳ Pendentes</div></div>
-        <div class="stat-item"><div class="num" id="stat-faturamento">R$ 0</div><div class="label">💰 Faturamento</div></div>
+        <div class="stat-item"><div class="num" id="stat-faturamento">R$ 0</div><div class="label">💰 Saldo líquido da plataforma</div></div>
       </div>
       
       <div class="card">
@@ -141,13 +141,22 @@ body{background:var(--bg);color:var(--texto)}
     <div id="aba-entregas" style="display:none">
       <div class="card">
         <h3>🧭 Frete, pedidos e GPS</h3>
-        <p class="info" style="margin-bottom:12px">O valor é fechado antes do pedido: base + distância, com adicionais limitados. Horário de pico automático: 11h–14h e 17h–20h.</p>
-        <div class="form-group"><label>Valor inicial do frete (R$)</label><input type="number" id="cfg-frete-base" min="0" step="0.01"></div>
-        <div class="form-group"><label>Valor por quilômetro (R$)</label><input type="number" id="cfg-valor-km" min="0" step="0.01"></div>
+        <p class="info" style="margin-bottom:12px">O cliente vê um preço simples por faixa de distância. O entregador recebe pela rota completa: posição atual → loja → cliente. Horário de pico automático: 11h–14h e 17h–20h.</p>
+        <div class="form-group"><label>Frete do cliente — até 2 km (R$)</label><input type="number" id="cfg-faixa-2" min="0" step="0.01"></div>
+        <div class="form-group"><label>Frete do cliente — até 4 km (R$)</label><input type="number" id="cfg-faixa-4" min="0" step="0.01"></div>
+        <div class="form-group"><label>Frete do cliente — até 6 km (R$)</label><input type="number" id="cfg-faixa-6" min="0" step="0.01"></div>
+        <div class="form-group"><label>Frete do cliente — até 8 km (R$)</label><input type="number" id="cfg-faixa-8" min="0" step="0.01"></div>
+        <div class="form-group"><label>Distância máxima da loja ao cliente (km)</label><input type="number" id="cfg-distancia-maxima" min="1" step="0.5"></div>
         <div class="form-group"><label>Fator de aproximação da rota</label><input type="number" id="cfg-fator-rota" min="1" step="0.05"></div>
         <div class="form-group"><label>Adicional de chuva (%)</label><input type="number" id="cfg-chuva" min="0" step="1"></div>
         <div class="form-group"><label>Adicional de horário de pico (%)</label><input type="number" id="cfg-pico" min="0" step="1"></div>
-        <div class="form-group"><label>Limite máximo dos adicionais (%)</label><input type="number" id="cfg-limite" min="0" step="1"></div>
+        <div class="form-group"><label>Limite máximo dos adicionais ao cliente (%)</label><input type="number" id="cfg-limite" min="0" max="10" step="1"></div>
+        <div style="margin:16px 0 10px;border-top:1px solid var(--borda);padding-top:14px"><strong>🛵 Ganho líquido do entregador</strong></div>
+        <div class="form-group"><label>Ganho mínimo por entrega (R$)</label><input type="number" id="cfg-ganho-minimo" min="0" step="0.01"></div>
+        <div class="form-group"><label>Ganho por km da rota completa (R$)</label><input type="number" id="cfg-ganho-km" min="0" step="0.01"></div>
+        <div class="form-group"><label>Limite do bônus do entregador (%)</label><input type="number" id="cfg-bonus-entregador" min="0" step="1"></div>
+        <div class="form-group"><label>Raio preferencial até a loja (km)</label><input type="number" id="cfg-raio-preferencial" min="0" step="0.5"></div>
+        <div class="form-group"><label>Raio máximo até a loja (km)</label><input type="number" id="cfg-raio-maximo" min="0" step="0.5"></div>
         <div style="margin:16px 0 10px;border-top:1px solid var(--borda);padding-top:14px"><strong>🛒 Pedido mínimo e receita</strong></div>
         <div class="form-group"><label>Pedido mínimo em produtos (R$)</label><input type="number" id="cfg-pedido-minimo" min="0" step="0.01"></div>
         <div class="form-group"><label>Até qual valor é pedido pequeno (R$)</label><input type="number" id="cfg-limite-pedido-pequeno" min="0" step="0.01"></div>
@@ -302,7 +311,7 @@ async function carregarFinanceiro() {
       <div class="pedido-item">
         <div class="flex">
           <span>${h.descricao}</span>
-          <span style="color:var(--verde);font-weight:600">+R$ ${h.valor.toFixed(2)}</span>
+          <span style="color:${h.tipo==='debito'?'#c62828':'var(--verde)'};font-weight:600">${h.tipo==='debito'?'-':'+'}R$ ${Number(h.valor).toFixed(2)}</span>
         </div>
         <div class="info">${h.data}</div>
       </div>
@@ -314,12 +323,20 @@ async function carregarConfiguracoesEntrega(){
   const r=await api('/api/admin/configuracoes-entrega');
   if(r.error)return;
   const c=r.configuracao;
-  document.getElementById('cfg-frete-base').value=Number(c.frete_base);
-  document.getElementById('cfg-valor-km').value=Number(c.valor_km);
+  document.getElementById('cfg-faixa-2').value=Number(c.frete_faixa_ate_2);
+  document.getElementById('cfg-faixa-4').value=Number(c.frete_faixa_ate_4);
+  document.getElementById('cfg-faixa-6').value=Number(c.frete_faixa_ate_6);
+  document.getElementById('cfg-faixa-8').value=Number(c.frete_faixa_ate_8);
+  document.getElementById('cfg-distancia-maxima').value=Number(c.distancia_maxima_entrega);
   document.getElementById('cfg-fator-rota').value=Number(c.fator_rota);
   document.getElementById('cfg-chuva').value=Number(c.adicional_chuva_percentual);
   document.getElementById('cfg-pico').value=Number(c.adicional_pico_percentual);
   document.getElementById('cfg-limite').value=Number(c.limite_adicionais_percentual);
+  document.getElementById('cfg-ganho-minimo').value=Number(c.ganho_minimo_entregador);
+  document.getElementById('cfg-ganho-km').value=Number(c.ganho_km_entregador);
+  document.getElementById('cfg-bonus-entregador').value=Number(c.limite_bonus_entregador_percentual);
+  document.getElementById('cfg-raio-preferencial').value=Number(c.raio_preferencial_coleta);
+  document.getElementById('cfg-raio-maximo').value=Number(c.raio_maximo_coleta);
   document.getElementById('cfg-pedido-minimo').value=Number(c.pedido_minimo);
   document.getElementById('cfg-limite-pedido-pequeno').value=Number(c.limite_pedido_pequeno);
   document.getElementById('cfg-taxa-pedido-pequeno').value=Number(c.taxa_pedido_pequeno);
@@ -330,12 +347,20 @@ async function carregarConfiguracoesEntrega(){
 
 async function salvarConfiguracoesEntrega(){
   const d={
-    frete_base:Number(document.getElementById('cfg-frete-base').value),
-    valor_km:Number(document.getElementById('cfg-valor-km').value),
+    frete_faixa_ate_2:Number(document.getElementById('cfg-faixa-2').value),
+    frete_faixa_ate_4:Number(document.getElementById('cfg-faixa-4').value),
+    frete_faixa_ate_6:Number(document.getElementById('cfg-faixa-6').value),
+    frete_faixa_ate_8:Number(document.getElementById('cfg-faixa-8').value),
+    distancia_maxima_entrega:Number(document.getElementById('cfg-distancia-maxima').value),
     fator_rota:Number(document.getElementById('cfg-fator-rota').value),
     adicional_chuva_percentual:Number(document.getElementById('cfg-chuva').value),
     adicional_pico_percentual:Number(document.getElementById('cfg-pico').value),
     limite_adicionais_percentual:Number(document.getElementById('cfg-limite').value),
+    ganho_minimo_entregador:Number(document.getElementById('cfg-ganho-minimo').value),
+    ganho_km_entregador:Number(document.getElementById('cfg-ganho-km').value),
+    limite_bonus_entregador_percentual:Number(document.getElementById('cfg-bonus-entregador').value),
+    raio_preferencial_coleta:Number(document.getElementById('cfg-raio-preferencial').value),
+    raio_maximo_coleta:Number(document.getElementById('cfg-raio-maximo').value),
     pedido_minimo:Number(document.getElementById('cfg-pedido-minimo').value),
     limite_pedido_pequeno:Number(document.getElementById('cfg-limite-pedido-pequeno').value),
     taxa_pedido_pequeno:Number(document.getElementById('cfg-taxa-pedido-pequeno').value),

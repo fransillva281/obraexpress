@@ -1,5 +1,9 @@
 # ObraExpress — comissão promocional das lojas e entregadores
 
+> **Atualização:** a comissão de 5%/7% das lojas continua vigente. A regra
+> antiga de porcentagem do frete do entregador foi substituída por ganho
+> líquido baseado na rota completa. Consulte `RELATORIO_FRETE_TERMOS.md`.
+
 ## Regra aprovada
 
 - Loja: 5% sobre os produtos nos cinco primeiros meses após a primeira venda concluída; depois 7%.

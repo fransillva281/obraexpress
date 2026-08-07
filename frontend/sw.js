@@ -1,5 +1,5 @@
-const CACHE = 'obraexpress-v8-pedido-minimo';
-const urls = ['/', '/loja/', '/entregador/', '/admin/', '/manifest.json'];
+const CACHE = 'obraexpress-v9-frete-termos';
+const urls = ['/', '/loja/', '/entregador/', '/admin/', '/termos.html', '/manifest.json'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(urls)));

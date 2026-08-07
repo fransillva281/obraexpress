@@ -40,6 +40,48 @@ function calcularTaxaPedidoPequeno(totalProdutos, configuracao = {}) {
   };
 }
 
+function calcularFretePorFaixa(distanciaKm, configuracao = {}) {
+  const distancia = Number(distanciaKm);
+  const distanciaMaxima = Number(configuracao.distancia_maxima_entrega ?? 8);
+  if (!Number.isFinite(distancia) || distancia < 0 || !Number.isFinite(distanciaMaxima) || distanciaMaxima <= 0) {
+    throw new Error('Distância de entrega inválida');
+  }
+  if (distancia > distanciaMaxima) {
+    return { disponivel: false, distanciaMaxima, valor: 0, faixa: `acima de ${distanciaMaxima} km` };
+  }
+  const faixas = [
+    [2, Number(configuracao.frete_faixa_ate_2 ?? 5.99), 'até 2 km'],
+    [4, Number(configuracao.frete_faixa_ate_4 ?? 7.99), 'de 2,1 a 4 km'],
+    [6, Number(configuracao.frete_faixa_ate_6 ?? 10.99), 'de 4,1 a 6 km'],
+    [distanciaMaxima, Number(configuracao.frete_faixa_ate_8 ?? 13.99), `de 6,1 a ${distanciaMaxima} km`]
+  ];
+  const faixa = faixas.find(([limite]) => distancia <= limite) || faixas[faixas.length - 1];
+  if (!Number.isFinite(faixa[1]) || faixa[1] < 0) throw new Error('Configuração das faixas de frete inválida');
+  return { disponivel: true, distanciaMaxima, valor: arredondarDinheiro(faixa[1]), faixa: faixa[2] };
+}
+
+function calcularGanhoLiquidoEntregador({ distanciaColetaKm = 0, distanciaEntregaKm = 0, adicionalPercentual = 0, configuracao = {} }) {
+  const coleta = Math.max(0, Number(distanciaColetaKm) || 0);
+  const entrega = Math.max(0, Number(distanciaEntregaKm) || 0);
+  const totalRota = coleta + entrega;
+  const minimo = Number(configuracao.ganho_minimo_entregador ?? 7.5);
+  const valorKm = Number(configuracao.ganho_km_entregador ?? 1.5);
+  const limiteBonus = Number(configuracao.limite_bonus_entregador_percentual ?? 15);
+  if (![minimo, valorKm, limiteBonus].every(Number.isFinite) || minimo < 0 || valorKm < 0 || limiteBonus < 0) {
+    throw new Error('Configuração de ganho do entregador inválida');
+  }
+  const bonus = Math.max(0, Math.min(Number(adicionalPercentual) || 0, limiteBonus));
+  const valorBase = Math.max(minimo, valorKm * totalRota);
+  return {
+    distanciaColetaKm: Math.round(coleta * 10) / 10,
+    distanciaEntregaKm: Math.round(entrega * 10) / 10,
+    distanciaTotalKm: Math.round(totalRota * 10) / 10,
+    valorBase: arredondarDinheiro(valorBase),
+    bonusPercentual: bonus,
+    valorLiquido: arredondarDinheiro(valorBase * (1 + bonus / 100))
+  };
+}
+
 function calcularFinanceiroPedido({
   totalProdutos,
   taxaEntrega,
@@ -78,6 +120,8 @@ function calcularFinanceiroPedido({
 
 module.exports = {
   arredondarDinheiro,
+  calcularFretePorFaixa,
+  calcularGanhoLiquidoEntregador,
   calcularPercentualPromocional,
   calcularTaxaPedidoPequeno,
   calcularFinanceiroPedido,

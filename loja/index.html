@@ -45,6 +45,7 @@ body{background:var(--bg);color:var(--texto)}
 .sound-alert{margin:10px 16px 0;width:calc(100% - 32px);padding:10px;border:1px solid #FFB74D;border-radius:10px;background:#FFF3E0;color:var(--laranja-escuro);font-weight:700;cursor:pointer}
 .finance-box{margin-top:8px;padding:10px;background:#F1F8E9;border-radius:9px;font-size:12px;line-height:1.7}
 .finance-box strong{color:var(--verde)}
+.legal-check{display:flex;align-items:flex-start;gap:9px;background:#fff8f3;border:1px solid #ffd2ba;border-radius:10px;padding:11px;margin:8px 16px;font-size:13px;line-height:1.45}.legal-check input{width:20px;height:20px;flex:0 0 auto;margin-top:1px}.legal-check a{color:var(--laranja);font-weight:700}.legal-modal{display:none;position:fixed;inset:0;background:#102027cc;z-index:1000;padding:18px}.legal-modal.active{display:flex;align-items:center;justify-content:center}.legal-modal-card{background:#fff;border-radius:18px;padding:20px;max-width:620px;width:100%;max-height:94vh;overflow:auto}.legal-modal-card h2{color:var(--laranja);margin-bottom:8px}.legal-modal-card p{font-size:14px;color:var(--texto-sec);line-height:1.55}
 </style>
 </head>
 <body>
@@ -57,6 +58,7 @@ body{background:var(--bg);color:var(--texto)}
       <div class="form-group"><label>Email</label><input type="email" id="login-email" placeholder="loja@email.com"></div>
       <div class="form-group"><label>Senha</label><input type="password" id="login-senha" placeholder="Sua senha"></div>
       <button class="btn btn-primary" onclick="loginLoja()">Entrar</button>
+      <a class="btn" href="/termos.html?perfil=loja" target="_blank" rel="noopener" style="border:2px solid var(--laranja);color:var(--laranja)">📜 Ler Termos e Regras</a>
       <div style="text-align:center;padding:16px;font-size:13px;color:var(--texto-sec)">Não tem conta? <a style="color:var(--laranja);font-weight:600;cursor:pointer" onclick="showCadastro()">Cadastre sua loja</a></div>
     </div>
     <div id="cadastro-form" style="display:none">
@@ -72,6 +74,8 @@ body{background:var(--bg);color:var(--texto)}
       <div class="form-group"><label>Tempo de preparo</label><input type="text" id="cad-tempo" value="30-60 min" placeholder="Ex: 30-60 min"></div>
       <div class="form-group"><label>Descrição</label><textarea id="cad-descricao" placeholder="Fale sobre sua loja..."></textarea></div>
       <div class="form-group"><label>Senha</label><input type="password" id="cad-senha" placeholder="Crie uma senha"></div>
+      <label class="legal-check"><input type="checkbox" id="cad-aceite-termos"> <span>Li e aceito os <a href="/termos.html?perfil=loja#termos" target="_blank" rel="noopener">Termos de Uso e as Regras da Loja</a>.</span></label>
+      <label class="legal-check"><input type="checkbox" id="cad-aceite-privacidade"> <span>Li a <a href="/termos.html?perfil=loja#privacidade" target="_blank" rel="noopener">Política de Privacidade</a> e entendi como os dados são usados.</span></label>
       <button class="btn btn-primary" onclick="cadastroLoja()">Cadastrar Loja</button>
       <div style="text-align:center;padding:16px;font-size:13px;color:var(--texto-sec)">Já tem conta? <a style="color:var(--laranja);font-weight:600;cursor:pointer" onclick="showLogin()">Fazer login</a></div>
     </div>
@@ -85,10 +89,23 @@ body{background:var(--bg);color:var(--texto)}
     <button id="tab-pedidos-loja" class="tab active" onclick="switchDashboardTab('pedidos',this)">📋 Pedidos</button>
     <button class="tab" onclick="switchDashboardTab('produtos',this)">📦 Produtos</button>
     <button class="tab" onclick="switchDashboardTab('perfil',this)">⚙️ Perfil</button>
+    <button class="tab" onclick="switchDashboardTab('termos',this)">📜 Termos</button>
   </div>
   <div id="dash-pedidos"></div>
   <div id="dash-produtos" style="display:none"></div>
   <div id="dash-perfil" style="display:none"></div>
+  <div id="dash-termos" style="display:none"></div>
+</div>
+
+<div id="legal-modal" class="legal-modal" role="dialog" aria-modal="true" aria-labelledby="legal-title">
+  <div class="legal-modal-card">
+    <h2 id="legal-title">📜 Leia para continuar</h2>
+    <p>Os documentos foram atualizados. Leia as responsabilidades da loja, comissão, produtos permitidos e Política de Privacidade.</p>
+    <a class="btn" href="/termos.html?perfil=loja" target="_blank" rel="noopener" style="border:2px solid var(--laranja);color:var(--laranja)">Abrir documento completo</a>
+    <label class="legal-check" style="margin:8px 0"><input type="checkbox" id="legal-aceite-termos"> <span>Li e aceito os Termos de Uso e as Regras da Loja.</span></label>
+    <label class="legal-check" style="margin:8px 0"><input type="checkbox" id="legal-aceite-privacidade"> <span>Li a Política de Privacidade.</span></label>
+    <button class="btn btn-primary" onclick="confirmarAceiteLegalLoja()">Aceitar e continuar</button>
+  </div>
 </div>
 
 <script>
@@ -104,6 +121,29 @@ let cadastroLojaLocalizacao = null;
 
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',3000);}
 async function api(path,opts={}){const h={'Content-Type':'application/json'};if(token)h['Authorization']='Bearer '+token;try{const r=await fetch(API+path,{...opts,headers:h});return await r.json()}catch(e){return{error:e.message}}}
+
+let continuarDepoisAceiteLoja=null;
+function mostrarAceiteLegalLoja(continuar){
+  continuarDepoisAceiteLoja=continuar||null;
+  document.getElementById('legal-aceite-termos').checked=false;
+  document.getElementById('legal-aceite-privacidade').checked=false;
+  document.getElementById('legal-modal').classList.add('active');
+}
+async function confirmarAceiteLegalLoja(){
+  const aceitou_termos=document.getElementById('legal-aceite-termos').checked;
+  const aceitou_privacidade=document.getElementById('legal-aceite-privacidade').checked;
+  if(!aceitou_termos||!aceitou_privacidade)return toast('Marque as duas confirmações');
+  const r=await api('/api/legal/aceite',{method:'POST',body:JSON.stringify({aceitou_termos,aceitou_privacidade})});
+  if(r.error)return toast(r.error);
+  document.getElementById('legal-modal').classList.remove('active');
+  const continuar=continuarDepoisAceiteLoja;continuarDepoisAceiteLoja=null;if(continuar)continuar();
+}
+async function verificarAceiteLegalLoja(){
+  if(!token)return false;
+  const r=await api('/api/legal/aceite');
+  if(r.termos_pendentes){mostrarAceiteLegalLoja(entrarDashboard);return false}
+  return true;
+}
 
 function showCadastro(){document.getElementById('login-form').style.display='none';document.getElementById('cadastro-form').style.display='block';carregarCategoriasDisponiveis()}
 function showLogin(){document.getElementById('login-form').style.display='block';document.getElementById('cadastro-form').style.display='none'}
@@ -160,7 +200,8 @@ async function loginLoja(){
   token=r.token;loja=r.loja;
   localStorage.setItem('loja_token',token);localStorage.setItem('loja',JSON.stringify(loja));
   document.getElementById('loja-header-name').textContent=loja.nome;
-  toast('Bem-vindo, '+loja.nome+'!');entrarDashboard();
+  const continuar=()=>{toast('Bem-vindo, '+loja.nome+'!');entrarDashboard()};
+  if(r.termos_pendentes)mostrarAceiteLegalLoja(continuar);else continuar();
 }
 
 function capturarLocalizacaoCadastroLoja(){
@@ -190,11 +231,14 @@ async function cadastroLoja(){
     longitude:cadastroLojaLocalizacao?.longitude,
     tempo_entrega_min:document.getElementById('cad-tempo').value,
     descricao:document.getElementById('cad-descricao').value,
-    senha:document.getElementById('cad-senha').value
+    senha:document.getElementById('cad-senha').value,
+    aceitou_termos:document.getElementById('cad-aceite-termos').checked,
+    aceitou_privacidade:document.getElementById('cad-aceite-privacidade').checked
   };
   if(!d.nome||!d.email||!d.senha)return toast('Preencha nome, email e senha');
   if(!d.categorias)return toast('Escolha pelo menos uma categoria');
   if(!cadastroLojaLocalizacao)return toast('Marque a localização GPS da loja');
+  if(!d.aceitou_termos||!d.aceitou_privacidade)return toast('Leia e marque as duas confirmações');
   const r=await api('/api/lojas/cadastro',{method:'POST',body:JSON.stringify(d)});
   if(r.error)return toast(r.error);
   token=r.token;loja=r.loja;
@@ -222,10 +266,15 @@ async function iniciarMonitorPedidosLoja(){
 function switchDashboardTab(tab,btn){
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   btn.classList.add('active');
-  ['pedidos','produtos','perfil'].forEach(t=>document.getElementById('dash-'+t).style.display=t===tab?'block':'none');
+  ['pedidos','produtos','perfil','termos'].forEach(t=>document.getElementById('dash-'+t).style.display=t===tab?'block':'none');
   if(tab==='pedidos')carregarPedidosLoja();
   if(tab==='produtos')carregarProdutosLoja();
   if(tab==='perfil')carregarPerfilLoja();
+  if(tab==='termos')carregarTermosLoja();
+}
+
+function carregarTermosLoja(){
+  document.getElementById('dash-termos').innerHTML=`<div class="card"><h3>📜 Termos, regras e privacidade</h3><p class="meta" style="line-height:1.6;margin:8px 0">Consulte as responsabilidades da loja, produtos permitidos, comissão, entrega, cancelamento e tratamento de dados.</p><a class="btn btn-primary" href="/termos.html?perfil=loja" target="_blank" rel="noopener">Abrir documento completo</a></div>`;
 }
 
 async function carregarPedidosLoja(){
@@ -490,7 +539,7 @@ async function excluirMinhaConta(){
 carregarCategoriasDisponiveis();
 if(loja){
   document.getElementById('loja-header-name').textContent=loja.nome;
-  entrarDashboard();
+  verificarAceiteLegalLoja().then(ok=>{if(ok)entrarDashboard()});
 }
 </script>
 <script>
