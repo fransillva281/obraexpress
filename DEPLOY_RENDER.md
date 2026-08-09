@@ -25,9 +25,10 @@ com uma mensagem clara para impedir gravações temporárias.
    - `EMPRESA_ENDERECO`: endereço completo para atendimento;
    - `EMPRESA_EMAIL_SUPORTE`: contato do consumidor;
    - `EMPRESA_EMAIL_PRIVACIDADE`: contato para pedidos da LGPD.
-8. Use `npm ci` como **Build Command**.
-9. Use `npm start` como **Start Command**.
-10. Salve escolhendo a opção que também inicia um novo deploy.
+8. Crie `PAYMENT_MODE` com o valor `mock`. Esse modo gera apenas uma simulação e não movimenta dinheiro.
+9. Use `npm ci` como **Build Command**.
+10. Use `npm start` como **Start Command**.
+11. Salve escolhendo a opção que também inicia um novo deploy.
 
 ## 3. Confirmar nos logs
 
@@ -61,6 +62,8 @@ Se o login continuar funcionando, o cadastro permaneceu no PostgreSQL.
 - Não coloque a URL real do banco em `.env`, documentação ou commits do GitHub.
 - Não inicie pagamentos reais enquanto a identificação empresarial estiver
   incompleta e os Termos não tiverem sido revisados por profissional jurídico.
+- Não coloque chave de provedor financeiro no GitHub. A versão atual usa apenas
+  `PAYMENT_MODE=mock`; o QR Code gerado é uma demonstração que não pode receber dinheiro.
 - Para serviços no mesmo Render e na mesma região, prefira a Internal Database
   URL, conforme a documentação oficial do Render.
 

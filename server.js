@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const QRCode = require('qrcode');
 const path = require('path');
 const crypto = require('crypto');
 const {
@@ -22,6 +23,11 @@ const {
   calcularFinanceiroPedido,
   normalizarPlanoLoja
 } = require('./financial-utils');
+const {
+  STATUS_PAGAMENTO,
+  criarReferenciaPagamentoTeste,
+  pagamentoExpirado
+} = require('./payment-utils');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -35,6 +41,8 @@ function requireEnvironment(name) {
 const JWT_SECRET = requireEnvironment('JWT_SECRET');
 const ADMIN_EMAIL = requireEnvironment('ADMIN_EMAIL');
 const ADMIN_PASSWORD = requireEnvironment('ADMIN_PASSWORD');
+// Esta versão aceita apenas o simulador. Nenhuma chave Pix real é usada.
+const PAYMENT_MODE = process.env.PAYMENT_MODE || 'mock';
 
 const TERMOS_VERSION = '2026-08-04.1';
 const PRIVACIDADE_VERSION = '2026-08-04.1';
@@ -665,6 +673,45 @@ async function montarItensPedido(lojaId, itens) {
   return { itens: itensConfirmados, totalProdutos: arredondarDinheiro(total) };
 }
 
+function pagamentoPublico(pagamento) {
+  if (!pagamento) return null;
+  return {
+    pedido_id: Number(pagamento.pedido_id),
+    status: pagamento.status,
+    valor: Number(pagamento.valor),
+    pix_copia_cola: pagamento.pix_copia_cola,
+    qr_code: pagamento.pix_qr_code,
+    expira_em: pagamento.expira_em,
+    confirmado_em: pagamento.confirmado_em,
+    ambiente_teste: pagamento.provedor === 'mock',
+    permite_simulacao_admin: pagamento.provedor === 'mock'
+  };
+}
+
+async function obterOuCriarPagamentoTeste(tx, pedido) {
+  const existente = await tx.get('SELECT * FROM pagamentos WHERE pedido_id = ?', [pedido.id]);
+  if (existente) return existente;
+
+  if (PAYMENT_MODE !== 'mock') {
+    throw Object.assign(new Error('O provedor Pix real ainda não está habilitado'), { status: 503 });
+  }
+
+  const referencia = criarReferenciaPagamentoTeste({ pedidoId: pedido.id, valor: pedido.total_final });
+  const qrCode = await QRCode.toDataURL(referencia.pixCopiaCola, {
+    errorCorrectionLevel: 'M',
+    margin: 1,
+    width: 280
+  });
+  await tx.run(`INSERT INTO pagamentos
+    (pedido_id, provedor, provedor_pagamento_id, idempotency_key, status, valor,
+     pix_copia_cola, pix_qr_code, expira_em)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  [pedido.id, referencia.provedor, referencia.provedorPagamentoId, referencia.idempotencyKey,
+    STATUS_PAGAMENTO.AGUARDANDO, Number(pedido.total_final), referencia.pixCopiaCola,
+    qrCode, referencia.expiraEm]);
+  return tx.get('SELECT * FROM pagamentos WHERE pedido_id = ?', [pedido.id]);
+}
+
 app.get('/api/configuracoes-compra', async (req, res) => {
   const config = await obterConfiguracaoFrete();
   res.json({
@@ -768,20 +815,89 @@ app.post('/api/pedidos', authCliente, async (req, res) => {
   }
 });
 
-// Cliente confirma o pedido (vê o valor e decide)
+// Cliente confirma o valor. O pedido fica invisível para a loja até o Pix ser confirmado.
 app.put('/api/pedidos/:id/confirmar', authCliente, async (req, res) => {
-  const pedido = await dbGet('SELECT * FROM pedidos WHERE id = ?', [req.params.id]);
-  if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado' });
-  if (pedido.cliente_id != req.usuario.id) return res.status(403).json({ error: 'Esse pedido não é seu' });
-  if (pedido.status !== 'aguardando_confirmacao') return res.status(400).json({ error: 'Pedido já foi processado' });
-  
-  const { confirmou } = req.body;
-  if (confirmou) {
-    await dbRun("UPDATE pedidos SET cliente_confirmou = 1, status = 'aguardando', data_confirmacao = CURRENT_TIMESTAMP WHERE id = ?", [req.params.id]);
-    res.json({ success: true, message: 'Pedido enviado para a loja confirmar.' });
-  } else {
-    await dbRun("UPDATE pedidos SET status = 'cancelado' WHERE id = ?", [req.params.id]);
-    res.json({ success: true, message: 'Pedido cancelado.' });
+  try {
+    const resultado = await dbTransaction(async tx => {
+      const pedido = await tx.get('SELECT * FROM pedidos WHERE id = ? FOR UPDATE', [req.params.id]);
+      if (!pedido) throw Object.assign(new Error('Pedido não encontrado'), { status: 404 });
+      if (pedido.cliente_id != req.usuario.id) throw Object.assign(new Error('Esse pedido não é seu'), { status: 403 });
+
+      const { confirmou } = req.body;
+      if (!confirmou) {
+        if (!['aguardando_confirmacao', 'aguardando_pagamento'].includes(pedido.status)) {
+          throw Object.assign(new Error('Pedido já foi processado'), { status: 400 });
+        }
+        await tx.run("UPDATE pedidos SET status = 'cancelado' WHERE id = ?", [pedido.id]);
+        await tx.run("UPDATE pagamentos SET status = 'cancelado', atualizado_em = CURRENT_TIMESTAMP WHERE pedido_id = ? AND status = 'aguardando'", [pedido.id]);
+        return { cancelado: true };
+      }
+
+      if (!['aguardando_confirmacao', 'aguardando_pagamento'].includes(pedido.status)) {
+        throw Object.assign(new Error('Pedido já foi processado'), { status: 400 });
+      }
+      const pagamento = await obterOuCriarPagamentoTeste(tx, pedido);
+      await tx.run("UPDATE pedidos SET cliente_confirmou = 1, status = 'aguardando_pagamento' WHERE id = ?", [pedido.id]);
+      return { cancelado: false, pagamento };
+    });
+
+    if (resultado.cancelado) return res.json({ success: true, message: 'Pedido cancelado.' });
+    res.json({
+      success: true,
+      message: 'Pedido criado. A loja só receberá depois da confirmação do Pix.',
+      pagamento: pagamentoPublico(resultado.pagamento)
+    });
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    console.error('Erro ao preparar Pix de teste:', error);
+    res.status(500).json({ error: 'Não foi possível preparar o pagamento de teste' });
+  }
+});
+
+// Cliente consulta somente o pagamento de um pedido que pertence à sua conta.
+app.get('/api/pagamentos/pedido/:pedido_id', authCliente, async (req, res) => {
+  let pagamento = await dbGet(`SELECT pg.* FROM pagamentos pg
+    JOIN pedidos p ON p.id = pg.pedido_id
+    WHERE pg.pedido_id = ? AND p.cliente_id = ?`, [req.params.pedido_id, req.usuario.id]);
+  if (!pagamento) return res.status(404).json({ error: 'Pagamento não encontrado' });
+
+  if (pagamentoExpirado(pagamento)) {
+    await dbTransaction(async tx => {
+      await tx.run("UPDATE pagamentos SET status = 'expirado', atualizado_em = CURRENT_TIMESTAMP WHERE id = ? AND status = 'aguardando'", [pagamento.id]);
+      await tx.run("UPDATE pedidos SET status = 'cancelado' WHERE id = ? AND status = 'aguardando_pagamento'", [pagamento.pedido_id]);
+    });
+    pagamento = await dbGet('SELECT * FROM pagamentos WHERE id = ?', [pagamento.id]);
+  }
+  res.json({ pagamento: pagamentoPublico(pagamento) });
+});
+
+// O botão existe somente no painel administrativo e somente no modo de teste.
+app.post('/api/admin/pagamentos/:pedido_id/simular', authAdmin, async (req, res) => {
+  if (PAYMENT_MODE !== 'mock') return res.status(403).json({ error: 'Simulação desativada fora do ambiente de teste' });
+  try {
+    const resultado = await dbTransaction(async tx => {
+      const pagamento = await tx.get('SELECT * FROM pagamentos WHERE pedido_id = ? FOR UPDATE', [req.params.pedido_id]);
+      const pedido = await tx.get('SELECT * FROM pedidos WHERE id = ? FOR UPDATE', [req.params.pedido_id]);
+      if (!pagamento || !pedido) throw Object.assign(new Error('Pagamento não encontrado'), { status: 404 });
+      if (pagamento.status === STATUS_PAGAMENTO.RECEBIDO) return pagamento;
+      if (pagamento.status !== STATUS_PAGAMENTO.AGUARDANDO || pedido.status !== 'aguardando_pagamento') {
+        throw Object.assign(new Error('Esse pagamento não pode mais ser confirmado'), { status: 409 });
+      }
+      await tx.run(`UPDATE pagamentos SET status = 'recebido', confirmado_em = CURRENT_TIMESTAMP,
+        atualizado_em = CURRENT_TIMESTAMP WHERE id = ?`, [pagamento.id]);
+      await tx.run(`UPDATE pedidos SET pix_pago = 1, status = 'aguardando',
+        data_confirmacao = CURRENT_TIMESTAMP WHERE id = ?`, [pedido.id]);
+      return tx.get('SELECT * FROM pagamentos WHERE id = ?', [pagamento.id]);
+    });
+    res.json({
+      success: true,
+      message: 'Pix de teste confirmado. O pedido foi liberado para a loja.',
+      pagamento: pagamentoPublico(resultado)
+    });
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    console.error('Erro ao simular pagamento:', error);
+    res.status(500).json({ error: 'Não foi possível confirmar o pagamento de teste' });
   }
 });
 
@@ -791,7 +907,7 @@ app.get('/api/pedidos/loja/:loja_id', authLojas, async (req, res) => {
   const { status } = req.query;
   let sql = `SELECT p.*, c.nome as cliente_nome, c.telefone as cliente_telefone, c.endereco_padrao, c.bairro
     FROM pedidos p JOIN clientes c ON p.cliente_id = c.id
-    WHERE p.loja_id = ? AND p.status <> 'aguardando_confirmacao'`;
+    WHERE p.loja_id = ? AND p.status NOT IN ('aguardando_confirmacao', 'aguardando_pagamento')`;
   const params = [req.params.loja_id];
   if (status) { sql += ' AND p.status = ?'; params.push(status); }
   sql += ' ORDER BY p.data_pedido DESC';
@@ -829,11 +945,13 @@ app.put('/api/pedidos/:id/iniciar-entrega-loja', authLojas, async (req, res) => 
 // Cliente vê seus pedidos
 app.get('/api/pedidos/cliente/:cliente_id', authCliente, async (req, res) => {
   if (req.usuario.id != req.params.cliente_id) return res.status(403).json({ error: 'Permissão negada' });
-  const pedidos = await dbAll(`SELECT p.*, l.nome as loja_nome, l.logo as loja_logo, l.chave_pix,
-    e.nome as entregador_nome, e.foto as entregador_foto, e.veiculo as entregador_veiculo
+  const pedidos = await dbAll(`SELECT p.*, l.nome as loja_nome, l.logo as loja_logo,
+    e.nome as entregador_nome, e.foto as entregador_foto, e.veiculo as entregador_veiculo,
+    pg.status AS pagamento_status, pg.expira_em AS pagamento_expira_em
     FROM pedidos p 
     JOIN lojas l ON p.loja_id = l.id 
     LEFT JOIN entregadores e ON p.entregador_id = e.id
+    LEFT JOIN pagamentos pg ON pg.pedido_id = p.id
     WHERE p.cliente_id = ? ORDER BY p.data_pedido DESC`, [req.params.cliente_id]);
   res.json({ pedidos });
 });
@@ -1071,6 +1189,10 @@ app.put('/api/pedidos/:id/status', async (req, res) => {
     if (usuario.tipo === 'loja' && status === 'cancelado' && !['aguardando', 'confirmado'].includes(pedido.status)) {
       return res.status(400).json({ error: 'Este pedido não pode mais ser cancelado pela loja' });
     }
+    if (pedido.forma_pagamento === 'pix' && !Number(pedido.pix_pago)
+      && status && !['aguardando_confirmacao', 'aguardando_pagamento', 'cancelado'].includes(status)) {
+      return res.status(409).json({ error: 'O pedido ainda não possui confirmação de pagamento' });
+    }
 
     const updates = []; const params = [];
     if (status) { updates.push('status = ?'); params.push(status); }
@@ -1281,11 +1403,13 @@ app.get('/api/admin/dashboard', authAdmin, async (req, res) => {
 
 app.get('/api/admin/pedidos', authAdmin, async (req, res) => {
   const { status } = req.query;
-  let sql = `SELECT p.*, l.nome as loja_nome, c.nome as cliente_nome, e.nome as entregador_nome
+  let sql = `SELECT p.*, l.nome as loja_nome, c.nome as cliente_nome, e.nome as entregador_nome,
+    pg.status AS pagamento_status, pg.provedor AS pagamento_provedor
     FROM pedidos p 
     JOIN lojas l ON p.loja_id = l.id 
     JOIN clientes c ON p.cliente_id = c.id 
-    LEFT JOIN entregadores e ON p.entregador_id = e.id`;
+    LEFT JOIN entregadores e ON p.entregador_id = e.id
+    LEFT JOIN pagamentos pg ON pg.pedido_id = p.id`;
   const params = [];
   if (status) { sql += ' WHERE p.status = ?'; params.push(status); }
   sql += ' ORDER BY p.data_pedido DESC LIMIT 50';

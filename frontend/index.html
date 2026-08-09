@@ -112,6 +112,7 @@ body{background:linear-gradient(180deg,#F7FAFB 0%,var(--bg) 45%);color:var(--tex
 .order-card .status{display:inline-block;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;margin-bottom:8px}
 .status-aguardando{background:#FFF3E0;color:#E65100}
 .status-aguardando_confirmacao{background:#FFF8E1;color:#F57F17}
+.status-aguardando_pagamento{background:#E3F2FD;color:#0D47A1}
 .status-confirmado{background:#E8F5E9;color:#2E7D32}
 .status-separado{background:#E3F2FD;color:#1565C0}
 .status-saiu_entrega{background:#F3E5F5;color:#7B1FA2}
@@ -131,6 +132,10 @@ body{background:linear-gradient(180deg,#F7FAFB 0%,var(--bg) 45%);color:var(--tex
 .confirm-box .detalhe{font-size:14px;color:var(--texto-sec);margin:4px 0}
 .confirm-box .detalhe strong{color:var(--texto)}
 .confirm-box .aviso{background:#FFF3E0;border-radius:8px;padding:12px;margin:16px 0;font-size:13px;color:var(--laranja-escuro)}
+.pix-teste{background:#F4FBF7;border:2px solid #A5D6A7;border-radius:14px;padding:16px;margin:16px 0;text-align:center}
+.pix-teste img{display:block;width:240px;max-width:100%;height:auto;margin:12px auto;border-radius:10px;background:#fff}
+.pix-teste textarea{width:100%;min-height:82px;resize:none;border:1px solid #BDBDBD;border-radius:8px;padding:10px;font-size:12px;background:#fff}
+.pix-teste .teste-faixa{display:inline-block;background:#FFF3E0;color:#BF360C;border-radius:999px;padding:6px 12px;font-size:12px;font-weight:800}
 .stars{display:flex;gap:8px;justify-content:center;margin:12px 0}
 .stars span{font-size:32px;cursor:pointer;opacity:.3;transition:.2s}
 .stars span.active{opacity:1}
@@ -267,9 +272,9 @@ body{background:linear-gradient(180deg,#F7FAFB 0%,var(--bg) 45%);color:var(--tex
     <div class="form-group">
       <label>Forma de pagamento</label>
       <select id="forma-pagamento">
-        <option value="pix">📱 Pix — modo de teste</option>
+        <option value="pix">📱 Pix — simulação segura</option>
       </select>
-      <div style="font-size:12px;color:var(--texto-sec);margin-top:6px">A cobrança real, o QR Code e a confirmação automática serão ativados na etapa Pix.</div>
+      <div style="font-size:12px;color:var(--texto-sec);margin-top:6px">Esta versão gera um QR Code de demonstração. Ele não movimenta dinheiro real.</div>
     </div>
     <div id="checkout-resumo" class="cart-resumo"></div>
     <button class="btn btn-primary" onclick="finalizarPedido()" style="margin:16px 0">✅ Fazer Pedido</button>
@@ -919,7 +924,7 @@ function mostrarConfirmacao() {
       
       <div class="aviso">
         ⚠️ <strong>Você está vendo o valor total do seu pedido.</strong><br>
-        Ambiente de testes: ainda não existe cobrança Pix real. Ao confirmar, o pedido será enviado para a loja apenas para testar o fluxo.
+        Ambiente de testes: ao confirmar, será criado um Pix simulado. A loja só verá o pedido depois que o administrador confirmar o pagamento de teste.
       </div>
 
       <div class="btn-group">
@@ -942,11 +947,78 @@ async function confirmarPedido(confirmou) {
   if (r.error) return toast(r.error);
   
   if (confirmou) {
-    toast('✅ Pedido confirmado! A loja vai preparar.');
+    if (!r.pagamento) return toast('Pagamento de teste não encontrado');
+    mostrarPixTeste(r.pagamento);
+    toast('🧪 Pix de teste criado. Nenhum dinheiro será movimentado.');
+    return;
   } else {
     toast('❌ Pedido cancelado');
   }
   navigate('pedidos');
+}
+
+let monitorPagamentoTeste = null;
+
+function mostrarPixTeste(pagamento) {
+  if (monitorPagamentoTeste) clearInterval(monitorPagamentoTeste);
+  window.pagamentoTesteAtual = pagamento;
+  window.pedidoConfirmarId = Number(pagamento.pedido_id);
+  const expiracao = pagamento.expira_em ? new Date(pagamento.expira_em).toLocaleString('pt-BR') : '30 minutos';
+  document.getElementById('confirmar-content').innerHTML = `
+    <div class="confirm-box">
+      <div class="pix-teste">
+        <span class="teste-faixa">🧪 SIMULAÇÃO — NÃO É PIX REAL</span>
+        <h2 style="font-size:21px;margin-top:12px">Aguardando pagamento de teste</h2>
+        <div class="valor-grande">R$ ${Number(pagamento.valor).toFixed(2)}</div>
+        <img src="${pagamento.qr_code}" alt="QR Code apenas para demonstração">
+        <label for="pix-copia-cola-teste" style="display:block;text-align:left;font-size:13px;font-weight:700;margin-bottom:6px">Código de demonstração</label>
+        <textarea id="pix-copia-cola-teste" readonly>${escaparHtml(pagamento.pix_copia_cola || '')}</textarea>
+        <button class="btn btn-primary" onclick="copiarPixTeste()">📋 Copiar código de teste</button>
+        <div class="aviso"><strong>Não tente pagar pelo aplicativo do banco.</strong><br>Esse QR Code foi criado somente para testar o funcionamento do ObraExpress.</div>
+        <div id="status-pix-teste" style="font-size:14px;font-weight:700;color:var(--laranja)">⏳ Aguardando o administrador confirmar no painel...</div>
+        <div style="font-size:12px;color:var(--texto-sec);margin-top:8px">Validade: ${expiracao}</div>
+      </div>
+      <button class="btn" onclick="navigate('pedidos')">Ver meus pedidos</button>
+    </div>`;
+  navigate('confirmar');
+  monitorPagamentoTeste = setInterval(verificarPagamentoTeste, 4000);
+}
+
+async function copiarPixTeste() {
+  const campo = document.getElementById('pix-copia-cola-teste');
+  if (!campo) return;
+  try {
+    await navigator.clipboard.writeText(campo.value);
+  } catch {
+    campo.select();
+    document.execCommand('copy');
+  }
+  toast('📋 Código de teste copiado');
+}
+
+async function verificarPagamentoTeste() {
+  const pedidoId = window.pedidoConfirmarId;
+  if (!pedidoId) return;
+  const r = await api('/api/pagamentos/pedido/' + pedidoId);
+  if (!r.pagamento) return;
+  const status = document.getElementById('status-pix-teste');
+  if (r.pagamento.status === 'recebido') {
+    if (monitorPagamentoTeste) clearInterval(monitorPagamentoTeste);
+    monitorPagamentoTeste = null;
+    if (status) status.innerHTML = '✅ Pagamento de teste confirmado! Pedido enviado para a loja.';
+    toast('✅ Pagamento confirmado e pedido liberado para a loja');
+    setTimeout(() => navigate('pedidos'), 1500);
+  } else if (['expirado', 'cancelado'].includes(r.pagamento.status)) {
+    if (monitorPagamentoTeste) clearInterval(monitorPagamentoTeste);
+    monitorPagamentoTeste = null;
+    if (status) status.innerHTML = '❌ Este pagamento de teste não está mais disponível.';
+  }
+}
+
+async function abrirPagamentoTeste(pedidoId) {
+  const r = await api('/api/pagamentos/pedido/' + pedidoId);
+  if (r.error) return toast(r.error);
+  mostrarPixTeste(r.pagamento);
 }
 
 // ============ PEDIDOS ============
@@ -962,6 +1034,7 @@ async function renderPedidos() {
   }
   const statusLabel = {
     'aguardando_confirmacao':'⏳ Confirme o pedido',
+    'aguardando_pagamento':'💠 Aguardando Pix',
     'aguardando':'⏳ Aguardando a loja',
     'confirmado':'✅ Confirmado',
     'separado':'📦 Sendo separado',
@@ -978,7 +1051,7 @@ async function renderPedidos() {
       <div class="total">R$ ${p.total_final.toFixed(2)}</div>
       <div class="meta">${p.tipo_entrega === 'entrega' ? '🛵 Entrega' : '🏪 Retirada'} • ${p.forma_pagamento === 'pix' ? '📱 Pix' : p.forma_pagamento === 'dinheiro' ? '💵 Dinheiro' : '💳 Cartão'}</div>
       ${p.entregador_nome ? `<div class="entregador-info">🛵 Entregador: ${p.entregador_nome}</div>` : ''}
-      ${p.chave_pix ? `<div class="pix-info">💳 <strong>Pix da loja:</strong> ${p.chave_pix}<br><small>Pague o valor e envie o comprovante</small></div>` : ''}
+      ${p.status === 'aguardando_pagamento' ? `<div class="pix-info">💠 <strong>Pix de teste aguardando</strong><br><small>Abra o pedido para visualizar a simulação.</small></div>` : ''}
       ${p.codigo_retirada ? `<div style="font-size:14px;font-weight:700;color:var(--laranja);margin-top:4px">Código retirada: ${p.codigo_retirada}</div>` : ''}
     </div>
   `).join('');
@@ -992,6 +1065,7 @@ async function verDetalhePedido(id) {
   
   const statusLabel = {
     'aguardando_confirmacao':'⏳ Confirme o pedido',
+    'aguardando_pagamento':'💠 Aguardando Pix',
     'aguardando':'⏳ Aguardando a loja',
     'confirmado':'✅ Pedido confirmado pela loja',
     'separado':'📦 Loja separou o pedido',
@@ -1001,6 +1075,7 @@ async function verDetalhePedido(id) {
   };
   const statusDesc = {
     'aguardando_confirmacao':'Aguardando você confirmar o valor total.',
+    'aguardando_pagamento':'O pedido ainda não foi liberado para a loja. Aguarde a confirmação do pagamento de teste.',
     'aguardando':'A loja recebeu o pedido e precisa confirmar.',
     'confirmado':'A loja recebeu seu pedido e está preparando.',
     'separado':'O pedido foi separado e está aguardando um motoboy.',
@@ -1040,7 +1115,7 @@ async function verDetalhePedido(id) {
         <strong>Entrega:</strong> ${p.tipo_entrega === 'entrega' ? '🛵 ' + (p.endereco_entrega || '') : '🏪 Retirada na loja'}
       </div>
       
-      ${p.chave_pix ? `<div class="pix-info">💳 <strong>Pix da loja:</strong> ${p.chave_pix}<br><small>Pague direto pra loja e combine a entrega</small></div>` : ''}
+      ${p.status === 'aguardando_pagamento' ? `<div class="pix-info"><strong>💠 Pagamento de teste pendente</strong><br><small>A loja ainda não recebeu este pedido.</small><br><button class="btn btn-primary" style="margin-top:8px" onclick="abrirPagamentoTeste(${p.id})">Abrir QR Code de teste</button></div>` : ''}
       
       ${p.entregador_nome ? `
         <hr style="margin:12px 0;border:none;border-top:1px solid var(--borda)">

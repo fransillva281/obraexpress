@@ -5,6 +5,7 @@ const path = require('node:path');
 
 const { buildRunSql, isUniqueViolation, toPostgresSql } = require('../database-utils');
 const { calcularFinanceiroPedido, calcularFretePorFaixa, calcularGanhoLiquidoEntregador, calcularPercentualPromocional, calcularTaxaPedidoPequeno, normalizarPlanoLoja } = require('../financial-utils');
+const { criarReferenciaPagamentoTeste, pagamentoExpirado } = require('../payment-utils');
 
 test('converte placeholders para o formato do PostgreSQL', () => {
   assert.equal(
@@ -228,4 +229,30 @@ test('termos, privacidade e aceite versionado existem nos três painéis', () =>
     assert.match(painel, /aceitou_termos/);
     assert.match(painel, /aceitou_privacidade/);
   }
+});
+
+test('Pix de teste não gera código bancário real e expira em 30 minutos', () => {
+  const agora = new Date('2026-08-07T18:00:00Z');
+  const pagamento = criarReferenciaPagamentoTeste({pedidoId: 7, valor: 23.75, agora, nonce:'ABC123'});
+  assert.equal(pagamento.provedor, 'mock');
+  assert.match(pagamento.pixCopiaCola, /^OBRAEXPRESS\.TESTE\|PEDIDO=7\|VALOR=23\.75/);
+  assert.equal(pagamento.expiraEm.toISOString(), '2026-08-07T18:30:00.000Z');
+  assert.equal(pagamentoExpirado({status:'aguardando', expira_em:'2026-08-07T18:29:59.000Z'}, agora), false);
+  assert.equal(pagamentoExpirado({status:'aguardando', expira_em:'2026-08-07T17:59:59.000Z'}, agora), true);
+});
+
+test('pedido Pix fica bloqueado até confirmação administrativa de teste', () => {
+  const raiz = path.join(__dirname, '..');
+  const schema = fs.readFileSync(path.join(raiz, 'db', 'schema.sql'), 'utf8');
+  const servidor = fs.readFileSync(path.join(raiz, 'server.js'), 'utf8');
+  const cliente = fs.readFileSync(path.join(raiz, 'frontend', 'index.html'), 'utf8');
+  const admin = fs.readFileSync(path.join(raiz, 'admin', 'index.html'), 'utf8');
+  assert.match(schema, /CREATE TABLE IF NOT EXISTS pagamentos/);
+  assert.match(schema, /idempotency_key TEXT UNIQUE NOT NULL/);
+  assert.match(servidor, /status = 'aguardando_pagamento'/);
+  assert.match(servidor, /NOT IN \('aguardando_confirmacao', 'aguardando_pagamento'\)/);
+  assert.match(servidor, /\/api\/admin\/pagamentos\/:pedido_id\/simular/);
+  assert.match(cliente, /SIMULAÇÃO — NÃO É PIX REAL/);
+  assert.doesNotMatch(cliente, /Pix da loja:/);
+  assert.match(admin, /Confirmar Pix de teste/);
 });

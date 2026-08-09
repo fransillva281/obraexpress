@@ -60,10 +60,11 @@ Para instalar no celular:
 2. ✅ **PWA instalável** (já incluso)
 3. ✅ **GPS e frete dinâmico**
 4. ✅ **Pedido mínimo e taxa de pedido pequeno configuráveis**
-5. 🔜 **Pix com confirmação automática**
-6. 🔜 **Parceria com lojas** de material
-7. 🔜 **Publicação em lojas de aplicativos**, usando contas elegíveis e seguindo as regras vigentes
-8. 🔜 **Notificação WhatsApp** dos pedidos
+5. ✅ **Pix de teste** com QR Code, bloqueio do pedido e confirmação pelo administrador
+6. 🔜 **Pix real** com provedor autorizado, conta empresarial e webhooks
+7. 🔜 **Parceria com lojas** de material
+8. 🔜 **Publicação em lojas de aplicativos**, usando contas elegíveis e seguindo as regras vigentes
+9. 🔜 **Notificação WhatsApp** dos pedidos
 
 ---
 

@@ -192,6 +192,29 @@ CREATE UNIQUE INDEX IF NOT EXISTS aceite_termos_unico
 CREATE INDEX IF NOT EXISTS idx_aceites_usuario
   ON aceites_termos (tipo_usuario, usuario_id, aceito_em DESC);
 
+-- Cobranças do pedido. Nesta versão o provedor "mock" permite testar todo o
+-- fluxo sem movimentar dinheiro. A tabela já separa o pedido da cobrança para
+-- receber um provedor Pix real futuramente sem alterar o histórico dos pedidos.
+CREATE TABLE IF NOT EXISTS pagamentos (
+  id SERIAL PRIMARY KEY,
+  pedido_id INTEGER UNIQUE NOT NULL REFERENCES pedidos(id) ON DELETE CASCADE,
+  provedor TEXT NOT NULL DEFAULT 'mock',
+  provedor_pagamento_id TEXT UNIQUE NOT NULL,
+  idempotency_key TEXT UNIQUE NOT NULL,
+  status TEXT NOT NULL DEFAULT 'aguardando'
+    CHECK (status IN ('aguardando', 'recebido', 'cancelado', 'expirado')),
+  valor NUMERIC(12,2) NOT NULL CHECK (valor > 0),
+  pix_copia_cola TEXT,
+  pix_qr_code TEXT,
+  expira_em TIMESTAMPTZ,
+  confirmado_em TIMESTAMPTZ,
+  criado_em TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  atualizado_em TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_pagamentos_status
+  ON pagamentos (status, criado_em DESC);
+
 CREATE TABLE IF NOT EXISTS categorias (
   id SERIAL PRIMARY KEY,
   nome TEXT NOT NULL,

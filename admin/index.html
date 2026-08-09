@@ -24,6 +24,7 @@ body{background:var(--bg);color:var(--texto)}
 .tag{display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600}
 .tag-aguardando{background:#FFF3E0;color:#E65100}
 .tag-aguardando_confirmacao{background:#FFF8E1;color:#F57F17}
+.tag-aguardando_pagamento{background:#E3F2FD;color:#0D47A1}
 .tag-confirmado{background:#E3F2FD;color:#1565C0}
 .tag-separado{background:#F3E5F5;color:#7B1FA2}
 .tag-saiu_entrega{background:#E8F5E9;color:#2E7D32}
@@ -106,6 +107,7 @@ body{background:var(--bg);color:var(--texto)}
       <div class="card">
         <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
           <button class="btn btn-sm btn-primary" onclick="carregarPedidos('')">Todos</button>
+          <button class="btn btn-sm" onclick="carregarPedidos('aguardando_pagamento')">💠 Pix pendente</button>
           <button class="btn btn-sm" onclick="carregarPedidos('aguardando')">⏳ Aguardando</button>
           <button class="btn btn-sm" onclick="carregarPedidos('confirmado')">✅ Confirmado</button>
           <button class="btn btn-sm" onclick="carregarPedidos('separado')">🟣 Separado</button>
@@ -241,7 +243,8 @@ async function carregarDashboard() {
   
   if (r.ultimosPedidos) {
     const statusLabels = {
-      'aguardando_confirmacao': '⏳ Cliente confirmando', 'aguardando': '⏳ Aguardando loja', 'confirmado': '✅ Confirmado',
+      'aguardando_confirmacao': '⏳ Cliente confirmando', 'aguardando_pagamento': '💠 Pix pendente',
+      'aguardando': '⏳ Aguardando loja', 'confirmado': '✅ Confirmado',
       'separado': '🟣 Separado', 'saiu_entrega': '🛵 Saiu p/ entrega',
       'entregue': '📦 Entregue', 'cancelado': '❌ Cancelado'
     };
@@ -262,7 +265,8 @@ async function carregarPedidos(status) {
   const r = await api(url);
   if (r.error) return;
   const statusLabels = {
-    'aguardando_confirmacao': '⏳ Cliente confirmando', 'aguardando': '⏳ Aguardando loja', 'confirmado': '✅ Confirmado',
+    'aguardando_confirmacao': '⏳ Cliente confirmando', 'aguardando_pagamento': '💠 Pix pendente',
+    'aguardando': '⏳ Aguardando loja', 'confirmado': '✅ Confirmado',
     'separado': '🟣 Separado', 'saiu_entrega': '🛵 Saiu p/ entrega',
     'entregue': '📦 Entregue', 'cancelado': '❌ Cancelado'
   };
@@ -274,9 +278,20 @@ async function carregarPedidos(status) {
       </div>
       <div class="info">👤 ${p.cliente_nome}${p.entregador_nome ? ' • 🛵 '+p.entregador_nome : ' • ⏳ Sem entregador'} • R$ ${p.total_final.toFixed(2)} • ${p.data_pedido}</div>
       <div class="info">Produtos: R$ ${Number(p.total_produtos||0).toFixed(2)} • Comissão loja: R$ ${Number(p.valor_comissao_loja||0).toFixed(2)} • Líquido loja: R$ ${Number(p.valor_liquido_loja||0).toFixed(2)}</div>
+      ${p.pagamento_status ? `<div class="info">💠 Pix: <strong>${p.pagamento_status}</strong>${p.pagamento_provedor==='mock'?' • ambiente de teste':''}</div>` : ''}
       ${Number(p.taxa_pedido_pequeno||0) ? `<div class="info">Taxa de pedido pequeno para a ObraExpress: R$ ${Number(p.taxa_pedido_pequeno).toFixed(2)}</div>` : ''}
+      ${p.status==='aguardando_pagamento' && p.pagamento_status==='aguardando' ? `<button class="btn btn-sm btn-primary" onclick="simularPagamentoTeste(${p.id})">🧪 Confirmar Pix de teste</button>` : ''}
     </div>
   `).join('');
+}
+
+async function simularPagamentoTeste(pedidoId) {
+  if (!confirm('Confirmar o Pix de TESTE deste pedido? Nenhum dinheiro real será movimentado.')) return;
+  const r = await api('/api/admin/pagamentos/' + pedidoId + '/simular', {method:'POST'});
+  if (r.error) return alert(r.error);
+  alert('✅ Pix de teste confirmado. O pedido agora foi liberado para a loja.');
+  carregarPedidos('');
+  carregarDashboard();
 }
 
 async function carregarFinanceiro() {
