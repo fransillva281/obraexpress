@@ -8,7 +8,7 @@
 *{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
 :root{--laranja:#E65100;--laranja-escuro:#BF360C;--bg:#F5F5F5;--branco:#fff;--texto:#212121;--texto-sec:#757575;--verde:#2E7D32;--vermelho:#C62828}
 body{background:var(--bg);color:var(--texto)}
-.header{background:var(--laranja);color:var(--branco);padding:16px;position:sticky;top:0;z-index:100}
+.header{background:var(--laranja);color:var(--branco);padding:16px;position:static;z-index:100}
 .header h1{font-size:20px;font-weight:700}
 .header .sub{font-size:12px;opacity:.8}
 .container{max-width:900px;margin:0 auto;padding:16px}
@@ -180,10 +180,10 @@ body{background:var(--bg);color:var(--texto)}
         <h3>✅ Verificação de cadastros</h3>
         <p class="info" style="margin-bottom:12px">Analise os dados antes de aprovar. Contas pendentes não recebem pedidos nem entregas.</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-          <button class="btn btn-sm btn-primary" onclick="carregarCadastros('pendente')">Pendentes</button>
-          <button class="btn btn-sm" onclick="carregarCadastros('aprovado')">Aprovados</button>
-          <button class="btn btn-sm" onclick="carregarCadastros('suspenso')">Suspensos</button>
-          <button class="btn btn-sm" onclick="carregarCadastros('')">Todos</button>
+          <button class="btn btn-sm filtro-cadastros" data-status="pendente" onclick="carregarCadastros('pendente')">Pendentes</button>
+          <button class="btn btn-sm filtro-cadastros" data-status="aprovado" onclick="carregarCadastros('aprovado')">Aprovados</button>
+          <button class="btn btn-sm filtro-cadastros" data-status="suspenso" onclick="carregarCadastros('suspenso')">Suspensos</button>
+          <button class="btn btn-sm filtro-cadastros" data-status="" onclick="carregarCadastros('')">Todos</button>
         </div>
         <div id="lista-cadastros"></div>
       </div>
@@ -213,6 +213,11 @@ body{background:var(--bg);color:var(--texto)}
       <div class="card">
         <h3>🔎 Auditoria administrativa</h3>
         <div id="lista-auditoria"></div>
+      </div>
+      <div class="card" style="border:2px solid #C62828">
+        <h3 style="color:#C62828">🧹 Limpar todos os dados de teste</h3>
+        <p class="info">Apaga clientes, lojas, entregadores, produtos, pedidos, pagamentos simulados, saldos e avisos. O administrador, as categorias e as configurações permanecem.</p>
+        <button class="btn" style="background:#C62828;color:#fff" onclick="limparTodosDadosTeste()">Apagar dados de teste</button>
       </div>
     </div>
   </div>
@@ -437,6 +442,7 @@ async function salvarConfiguracoesEntrega(){
 }
 
 async function carregarCadastros(status='pendente') {
+  document.querySelectorAll('.filtro-cadastros').forEach(botao => botao.classList.toggle('btn-primary', botao.dataset.status === status));
   const r = await api('/api/admin/cadastros' + (status ? '?status=' + encodeURIComponent(status) : ''));
   if (r.error) return;
   const grupos = [
@@ -452,13 +458,29 @@ async function carregarCadastros(status='pendente') {
         <div class="info">${h(item.email)} • ${h(item.telefone || 'Sem telefone')} • ${h(item.cidade || 'Cidade não informada')}/${h(item.estado || '--')}</div>
         <div class="info">${tipo === 'loja' ? 'CNPJ: ' + h(item.cnpj) : tipo === 'entregador' ? 'CPF: ' + h(item.cpf) + ' • Placa: ' + h(item.placa) : 'CEP: ' + h(item.cep || 'não informado')}</div>
         ${item.status_motivo ? `<div class="info">Motivo: ${h(item.status_motivo)}</div>` : ''}
-        <div style="margin-top:6px">
-          <button class="btn btn-sm btn-primary" onclick="alterarCadastro('${tipo}',${Number(item.id)},'aprovado')">Aprovar</button>
-          <button class="btn btn-sm" onclick="alterarCadastro('${tipo}',${Number(item.id)},'recusado')">Recusar</button>
-          <button class="btn btn-sm" onclick="alterarCadastro('${tipo}',${Number(item.id)},'suspenso')">Suspender</button>
-        </div>
+        ${acoesCadastroHtml(tipo,item)}
       </div>`).join('') || '<div class="info">Nenhum cadastro nesta situação.</div>'}
   `).join('');
+}
+
+function acoesCadastroHtml(tipo,item) {
+  const excluido = /exclu[ií]d/i.test(String(item.nome || '')) || /@invalid\.local$/i.test(String(item.email || ''));
+  if (excluido) return '<div class="info" style="margin-top:6px">🗄️ Cadastro arquivado — nenhuma ação disponível.</div>';
+  if (item.status_cadastro === 'pendente') return `<div style="margin-top:6px"><button class="btn btn-sm btn-primary" onclick="alterarCadastro('${tipo}',${Number(item.id)},'aprovado')">Aprovar</button><button class="btn btn-sm" onclick="alterarCadastro('${tipo}',${Number(item.id)},'recusado')">Recusar</button></div>`;
+  if (item.status_cadastro === 'aprovado') return `<div style="margin-top:6px"><button class="btn btn-sm" onclick="alterarCadastro('${tipo}',${Number(item.id)},'suspenso')">Suspender</button></div>`;
+  return `<div style="margin-top:6px"><button class="btn btn-sm btn-primary" onclick="alterarCadastro('${tipo}',${Number(item.id)},'aprovado')">Reativar</button></div>`;
+}
+
+async function limparTodosDadosTeste() {
+  const primeira = confirm('ATENÇÃO: isso apagará permanentemente todos os cadastros, pedidos, produtos e saldos de teste. Deseja continuar?');
+  if (!primeira) return;
+  const confirmacao = prompt('Para confirmar, digite exatamente: LIMPAR TESTES');
+  if (confirmacao !== 'LIMPAR TESTES') return alert('A limpeza foi cancelada. A frase não foi digitada corretamente.');
+  const r = await api('/api/admin/limpar-dados-teste', {method:'POST', body:JSON.stringify({confirmacao})});
+  if (r.error) return alert(r.error);
+  alert('✅ Todos os dados de teste foram apagados. O painel começará do zero.');
+  carregarDashboard();
+  carregarOperacao();
 }
 
 async function alterarCadastro(tipo, id, status) {

@@ -2001,16 +2001,21 @@ app.delete('/api/lojas/:id', authLojas, async (req, res) => {
 
 // Limpeza autorizada das contas e dados de teste, somente pelo administrador
 app.post('/api/admin/limpar-dados-teste', authAdmin, async (req, res) => {
+  if (req.body.confirmacao !== 'LIMPAR TESTES') {
+    return res.status(400).json({ error: 'Confirmação de limpeza inválida' });
+  }
   try {
-    for (const sql of [
-      'DELETE FROM notificacoes', 'DELETE FROM auditoria_admin', 'DELETE FROM reembolsos',
-      'DELETE FROM reservas_estoque', 'DELETE FROM pagamentos', 'DELETE FROM saques',
-      'DELETE FROM aceites_termos', 'DELETE FROM avaliacoes', 'DELETE FROM saldo_plataforma',
-      'DELETE FROM movimentacoes_lojas', 'DELETE FROM saldo_lojas',
-      'DELETE FROM saldo_entregadores', 'DELETE FROM pedidos',
-      'DELETE FROM produtos', 'DELETE FROM lojas',
-      'DELETE FROM clientes', 'DELETE FROM entregadores'
-    ]) await dbRun(sql);
+    await dbTransaction(async tx => {
+      for (const sql of [
+        'DELETE FROM notificacoes', 'DELETE FROM auditoria_admin', 'DELETE FROM reembolsos',
+        'DELETE FROM reservas_estoque', 'DELETE FROM pagamentos', 'DELETE FROM saques',
+        'DELETE FROM aceites_termos', 'DELETE FROM avaliacoes', 'DELETE FROM saldo_plataforma',
+        'DELETE FROM movimentacoes_lojas', 'DELETE FROM saldo_lojas',
+        'DELETE FROM saldo_entregadores', 'DELETE FROM pedidos',
+        'DELETE FROM produtos', 'DELETE FROM lojas',
+        'DELETE FROM clientes', 'DELETE FROM entregadores'
+      ]) await tx.run(sql);
+    });
     res.json({ success: true, message: 'Todos os dados de teste foram excluídos. E-mails, CPFs e CNPJs podem ser reutilizados.' });
   } catch (e) { console.error('Limpeza de teste:', e); res.status(500).json({ error: 'A limpeza não foi concluída' }); }
 });

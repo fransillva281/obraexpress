@@ -293,8 +293,19 @@ test('PWA usa cache v11 e ícones que realmente existem', () => {
   const raiz = path.join(__dirname, '..');
   const sw = fs.readFileSync(path.join(raiz, 'frontend', 'sw.js'), 'utf8');
   const manifest = JSON.parse(fs.readFileSync(path.join(raiz, 'frontend', 'manifest.json'), 'utf8'));
-  assert.match(sw, /obraexpress-v11-operacao-segura/);
+  assert.match(sw, /obraexpress-v11-1-limpeza-testes/);
   for (const icon of manifest.icons) {
     assert.equal(fs.existsSync(path.join(raiz, 'frontend', icon.src.replace(/^\//, ''))), true, `ícone ausente: ${icon.src}`);
   }
+});
+
+test('limpeza de teste exige confirmação dupla e preserva configurações', () => {
+  const raiz = path.join(__dirname, '..');
+  const servidor = fs.readFileSync(path.join(raiz, 'server.js'), 'utf8');
+  const admin = fs.readFileSync(path.join(raiz, 'admin', 'index.html'), 'utf8');
+  assert.match(servidor, /req\.body\.confirmacao !== 'LIMPAR TESTES'/);
+  assert.match(servidor, /\/api\/admin\/limpar-dados-teste/);
+  assert.match(admin, /Apagar dados de teste/);
+  assert.match(admin, /digite exatamente: LIMPAR TESTES/);
+  assert.doesNotMatch(servidor.match(/app\.post\('\/api\/admin\/limpar-dados-teste'[\s\S]*?\n\}\);/)?.[0] || '', /DELETE FROM categorias|DELETE FROM configuracoes_plataforma/);
 });
