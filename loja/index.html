@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="ObraExpress Loja">
-<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-192.svg">
 <style>
 *{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
 :root{--laranja:#E65100;--laranja-escuro:#BF360C;--bg:#F5F5F5;--branco:#fff;--texto:#212121;--texto-sec:#757575;--borda:#E0E0E0;--verde:#2E7D32;--azul:#1565C0}
@@ -63,10 +63,15 @@ body{background:var(--bg);color:var(--texto)}
     </div>
     <div id="cadastro-form" style="display:none">
       <div class="form-group"><label>Nome da Loja</label><input type="text" id="cad-nome" placeholder="Material de Construção do João"></div>
+      <div class="form-group"><label>CNPJ</label><input type="text" id="cad-cnpj" inputmode="numeric" placeholder="00.000.000/0001-00"></div>
       <div class="form-group"><label>Email</label><input type="email" id="cad-email" placeholder="loja@email.com"></div>
       <div class="form-group"><label>Telefone / WhatsApp</label><input type="text" id="cad-telefone" placeholder="(98) 99999-9999"></div>
       <div class="form-group"><label>Endereço</label><input type="text" id="cad-endereco" placeholder="Rua, número"></div>
       <div class="form-group"><label>Bairro</label><input type="text" id="cad-bairro" placeholder="Centro"></div>
+      <div class="form-group"><label>CEP</label><input type="text" id="cad-cep" inputmode="numeric" placeholder="00000-000"></div>
+      <div class="form-group"><label>Cidade</label><input type="text" id="cad-cidade" placeholder="Palmas"></div>
+      <div class="form-group"><label>Estado (UF)</label><input type="text" id="cad-estado" maxlength="2" placeholder="TO"></div>
+      <div class="form-group"><label>Raio máximo atendido pela loja (km)</label><input type="number" id="cad-raio" min="1" max="30" step="0.5" value="8"></div>
       <div class="form-group"><button type="button" class="btn btn-primary" onclick="capturarLocalizacaoCadastroLoja()">📍 Marcar localização da loja</button><div id="cad-gps-loja-status" class="meta" style="margin-top:6px">Obrigatório para calcular o frete e guiar o entregador.</div></div>
       <div class="form-group"><label>Chave Pix (para receber)</label><input type="text" id="cad-pix" placeholder="CPF, email, telefone ou chave aleatória"></div>
       <div class="form-group"><label>Categorias atendidas pela loja</label><div id="cad-categorias-list" class="category-options">Carregando categorias...</div></div>
@@ -84,16 +89,19 @@ body{background:var(--bg);color:var(--texto)}
 
 <div id="page-dashboard" class="pages" style="display:none">
   <div class="header"><h1>🏪 <span id="loja-header-name">Painel</span></h1><div class="sub">Gerenciar loja e pedidos</div></div>
+  <div id="cadastro-status-loja"></div>
   <button id="alerta-som-loja" class="sound-alert" onclick="alternarAlertasLoja()">🔕 Ativar alertas sonoros</button>
   <div class="tabs" style="margin-top:12px">
     <button id="tab-pedidos-loja" class="tab active" onclick="switchDashboardTab('pedidos',this)">📋 Pedidos</button>
     <button class="tab" onclick="switchDashboardTab('produtos',this)">📦 Produtos</button>
     <button class="tab" onclick="switchDashboardTab('perfil',this)">⚙️ Perfil</button>
+    <button class="tab" onclick="switchDashboardTab('avisos',this)">🔔 Avisos</button>
     <button class="tab" onclick="switchDashboardTab('termos',this)">📜 Termos</button>
   </div>
   <div id="dash-pedidos"></div>
   <div id="dash-produtos" style="display:none"></div>
   <div id="dash-perfil" style="display:none"></div>
+  <div id="dash-avisos" style="display:none"></div>
   <div id="dash-termos" style="display:none"></div>
 </div>
 
@@ -120,6 +128,7 @@ let alertasLojaAtivos = localStorage.getItem('alertas_som_loja') === '1';
 let cadastroLojaLocalizacao = null;
 
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',3000);}
+function escaparHtml(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 async function api(path,opts={}){const h={'Content-Type':'application/json'};if(token)h['Authorization']='Bearer '+token;try{const r=await fetch(API+path,{...opts,headers:h});return await r.json()}catch(e){return{error:e.message}}}
 
 let continuarDepoisAceiteLoja=null;
@@ -224,6 +233,11 @@ async function cadastroLoja(){
     telefone:document.getElementById('cad-telefone').value,
     endereco:document.getElementById('cad-endereco').value,
     bairro:document.getElementById('cad-bairro').value,
+    cnpj:document.getElementById('cad-cnpj').value,
+    cep:document.getElementById('cad-cep').value,
+    cidade:document.getElementById('cad-cidade').value,
+    estado:document.getElementById('cad-estado').value,
+    raio_entrega_km:Number(document.getElementById('cad-raio').value),
     chave_pix:document.getElementById('cad-pix').value,
     categorias:categoriasSelecionadasCadastro(),
     plano:document.getElementById('cad-plano').value,
@@ -235,7 +249,7 @@ async function cadastroLoja(){
     aceitou_termos:document.getElementById('cad-aceite-termos').checked,
     aceitou_privacidade:document.getElementById('cad-aceite-privacidade').checked
   };
-  if(!d.nome||!d.email||!d.senha)return toast('Preencha nome, email e senha');
+  if(!d.nome||!d.cnpj||!d.email||!d.senha||!d.cep||!d.cidade||!d.estado)return toast('Preencha os dados da loja e da cidade');
   if(!d.categorias)return toast('Escolha pelo menos uma categoria');
   if(!cadastroLojaLocalizacao)return toast('Marque a localização GPS da loja');
   if(!d.aceitou_termos||!d.aceitou_privacidade)return toast('Leia e marque as duas confirmações');
@@ -244,7 +258,7 @@ async function cadastroLoja(){
   token=r.token;loja=r.loja;
   localStorage.setItem('loja_token',token);localStorage.setItem('loja',JSON.stringify(loja));
   document.getElementById('loja-header-name').textContent=loja.nome;
-  toast('Loja cadastrada!');entrarDashboard();
+  toast(r.message||'Cadastro enviado para aprovação!');entrarDashboard();
 }
 
 function entrarDashboard(){
@@ -252,8 +266,16 @@ function entrarDashboard(){
   document.getElementById('page-login').classList.remove('active');
   document.getElementById('page-dashboard').style.display='block';
   document.getElementById('page-dashboard').classList.add('active');
+  renderStatusCadastroLoja();
   atualizarBotaoSomLoja();
-  iniciarMonitorPedidosLoja();
+  if(loja.status_cadastro==='aprovado'||!loja.status_cadastro)iniciarMonitorPedidosLoja();
+}
+
+function renderStatusCadastroLoja(){
+  const el=document.getElementById('cadastro-status-loja');
+  if(!loja||loja.status_cadastro==='aprovado'||!loja.status_cadastro){el.innerHTML='';return;}
+  const titulo=loja.status_cadastro==='suspenso'?'Conta suspensa':'Cadastro em análise';
+  el.innerHTML=`<div class="card" style="border:2px solid #FFB74D;background:#FFF8E1"><h3>⏳ ${titulo}</h3><div class="meta">A loja poderá cadastrar produtos e receber pedidos depois da aprovação administrativa.${loja.status_motivo?'<br>Motivo: '+loja.status_motivo:''}</div></div>`;
 }
 
 async function iniciarMonitorPedidosLoja(){
@@ -266,15 +288,30 @@ async function iniciarMonitorPedidosLoja(){
 function switchDashboardTab(tab,btn){
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   btn.classList.add('active');
-  ['pedidos','produtos','perfil','termos'].forEach(t=>document.getElementById('dash-'+t).style.display=t===tab?'block':'none');
+  ['pedidos','produtos','perfil','avisos','termos'].forEach(t=>document.getElementById('dash-'+t).style.display=t===tab?'block':'none');
   if(tab==='pedidos')carregarPedidosLoja();
   if(tab==='produtos')carregarProdutosLoja();
   if(tab==='perfil')carregarPerfilLoja();
+  if(tab==='avisos')carregarAvisosLoja();
   if(tab==='termos')carregarTermosLoja();
 }
 
 function carregarTermosLoja(){
   document.getElementById('dash-termos').innerHTML=`<div class="card"><h3>📜 Termos, regras e privacidade</h3><p class="meta" style="line-height:1.6;margin:8px 0">Consulte as responsabilidades da loja, produtos permitidos, comissão, entrega, cancelamento e tratamento de dados.</p><a class="btn btn-primary" href="/termos.html?perfil=loja" target="_blank" rel="noopener">Abrir documento completo</a></div>`;
+}
+
+async function carregarAvisosLoja(){
+  const el=document.getElementById('dash-avisos');
+  const r=await api('/api/notificacoes');
+  if(r.error){el.innerHTML=`<div class="card">⚠️ ${escaparHtml(r.error)}</div>`;return;}
+  el.innerHTML=`<div class="card"><h3>🔔 Avisos (${Number(r.nao_lidas||0)} novos)</h3>
+    ${(r.notificacoes||[]).map(n=>`<div class="finance-box" style="${Number(n.lida)?'opacity:.65':''}"><strong>${escaparHtml(n.titulo)}</strong><br>${escaparHtml(n.mensagem)}<br><span class="meta">${escaparHtml(n.criada_em)}</span></div>`).join('')||'<div class="meta">Nenhum aviso.</div>'}
+    ${Number(r.nao_lidas||0)?'<button class="btn btn-primary btn-sm" onclick="marcarAvisosLoja()">Marcar todos como lidos</button>':''}</div>`;
+}
+
+async function marcarAvisosLoja(){
+  await api('/api/notificacoes/lidas/todas',{method:'PUT'});
+  carregarAvisosLoja();
 }
 
 async function carregarPedidosLoja(){
@@ -355,7 +392,9 @@ async function confirmarPedido(id){
 }
 
 async function cancelarPedido(id){
-  const r=await api('/api/pedidos/'+id+'/status',{method:'PUT',body:JSON.stringify({status:'cancelado'})});
+  const motivo=prompt('Por que a loja precisa cancelar este pedido?');
+  if(!motivo||motivo.trim().length<5)return toast('Informe um motivo com pelo menos 5 letras');
+  const r=await api('/api/pedidos/'+id+'/cancelar',{method:'POST',body:JSON.stringify({motivo})});
   if(r.error)return toast(r.error);toast('❌ Pedido cancelado');carregarPedidosLoja();
 }
 
@@ -399,7 +438,7 @@ async function carregarProdutosLoja(){
       <div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
         <div style="display:flex;align-items:center;gap:10px">
           ${p.foto ? `<img src="${p.foto}" style="width:58px;height:58px;object-fit:cover;border-radius:8px">` : '<div style="font-size:36px">📦</div>'}
-          <div><h3>${p.nome}</h3><div class="meta">R$ ${Number(p.preco).toFixed(2)} • ${p.marca||''} • ${p.categoria||''}</div></div>
+          <div><h3>${p.nome}</h3><div class="meta">R$ ${Number(p.preco).toFixed(2)} • ${p.marca||''} • ${p.categoria||''}<br>Estoque: ${Number(p.estoque||0)}</div></div>
         </div>
         <button style="background:#C62828;color:var(--branco);border:none;padding:6px 12px;border-radius:6px;cursor:pointer" onclick="removerProduto(${p.id})">🗑️</button>
       </div>
@@ -414,6 +453,7 @@ function adicionarProdutoForm(){
       <h3 style="margin-bottom:8px">➕ Adicionar Produto</h3>
       <div class="form-group" style="padding:0;margin-bottom:8px"><label>Nome</label><input type="text" id="novo-produto-nome" placeholder="Conexão 25mm"></div>
       <div class="form-group" style="padding:0;margin-bottom:8px"><label>Preço (R$)</label><input type="number" id="novo-produto-preco" step="0.01" placeholder="15.90"></div>
+      <div class="form-group" style="padding:0;margin-bottom:8px"><label>Quantidade em estoque</label><input type="number" id="novo-produto-estoque" min="0" step="1" value="10"></div>
       <div class="form-group" style="padding:0;margin-bottom:8px"><label>Marca (opcional)</label><input type="text" id="novo-produto-marca" placeholder="Tigre/Amanco"></div>
       <div class="form-group" style="padding:0;margin-bottom:8px"><label>Categoria</label><select id="novo-produto-categoria"><option value="">Escolha uma categoria</option>${opcoes}</select></div>
       <div class="form-group" style="padding:0;margin-bottom:8px"><label>Imagem do produto (opcional)</label><input type="file" id="novo-produto-foto" accept="image/jpeg,image/png,image/webp" onchange="previsualizarProduto(event)" style="width:100%;padding:8px"><div id="preview-produto" style="margin-top:8px"></div></div>
@@ -436,6 +476,7 @@ async function adicionarProduto(){
   const d={
     nome:document.getElementById('novo-produto-nome').value,
     preco:parseFloat(document.getElementById('novo-produto-preco').value)||0,
+    estoque:Math.max(0,parseInt(document.getElementById('novo-produto-estoque').value,10)||0),
     marca:document.getElementById('novo-produto-marca').value,
     categoria:document.getElementById('novo-produto-categoria').value,
     foto:fotoProdutoSelecionada || null
@@ -485,6 +526,9 @@ async function carregarPerfilLoja(){
       <h3>💰 Financeiro <small style="color:var(--texto-sec)">(calculado)</small></h3>
       <div style="font-size:26px;font-weight:800;color:var(--verde)">R$ ${Number(r.saldo.saldo||0).toFixed(2)}</div>
       <div class="meta">Total líquido calculado: R$ ${Number(r.saldo.total_recebido||0).toFixed(2)}</div>
+      <div class="finance-box"><strong>Solicitação de retirada — somente teste</strong><br><span class="meta">Nenhum dinheiro real é enviado nesta versão.</span><br>
+        <input id="saque-loja-valor" type="number" min="10" step="0.01" placeholder="Valor (mínimo R$ 10)" style="width:100%;padding:9px;margin:7px 0;border:1px solid #ddd;border-radius:8px">
+        <button class="btn btn-primary btn-sm" onclick="solicitarSaqueLojaTeste()">Registrar solicitação de teste</button></div>
       <div style="margin-top:10px">${(r.movimentacoes||[]).slice(0,8).map(m=>`<div class="finance-box"><strong>Pedido #${m.pedido_id}</strong><br>Venda: R$ ${Number(m.valor_bruto).toFixed(2)} • Comissão: R$ ${Number(m.valor_comissao).toFixed(2)}<br>Líquido: R$ ${Number(m.valor_liquido).toFixed(2)}</div>`).join('')||'<div class="meta">Nenhuma venda concluída.</div>'}</div>
       <div class="meta" style="margin-top:8px">O repasse bancário real será ativado com a integração de pagamentos.</div>`;
   });
@@ -500,6 +544,16 @@ async function carregarPerfilLoja(){
       `;
     }
   });
+}
+
+async function solicitarSaqueLojaTeste(){
+  const valor=Number(document.getElementById('saque-loja-valor')?.value);
+  if(!Number.isFinite(valor)||valor<10)return toast('Informe pelo menos R$ 10,00');
+  if(!confirm('Registrar esta solicitação somente no ambiente de teste?'))return;
+  const r=await api('/api/saques',{method:'POST',body:JSON.stringify({valor})});
+  if(r.error)return toast(r.error);
+  toast(r.message||'Solicitação registrada');
+  carregarPerfilLoja();
 }
 
 function atualizarLocalizacaoLoja(){

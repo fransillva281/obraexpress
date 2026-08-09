@@ -44,7 +44,7 @@ test('comparação de produtos e alertas sonoros estão presentes nos painéis',
   const cliente = fs.readFileSync(path.join(raiz, 'frontend', 'index.html'), 'utf8');
   const loja = fs.readFileSync(path.join(raiz, 'loja', 'index.html'), 'utf8');
   const entregador = fs.readFileSync(path.join(raiz, 'entregador', 'index.html'), 'utf8');
-  assert.match(cliente, /ordem=menor_preco/);
+  assert.match(cliente, /ordem:'menor_preco'/);
   assert.match(cliente, /MENOR PREÇO DA LISTA/);
   assert.match(loja, /alerta-som-loja/);
   assert.match(entregador, /alerta-som-entregador/);
@@ -56,7 +56,7 @@ test('cliente possui categorias em grade e busca por produto, loja ou categoria'
   const servidor = fs.readFileSync(path.join(raiz, 'server.js'), 'utf8');
   assert.match(cliente, /class="category-grid"/);
   assert.match(cliente, /Busque por produto, loja ou categoria/);
-  assert.match(cliente, /api\('\/api\/lojas\?busca=/);
+  assert.match(cliente, /urlComLocalizacao\('\/api\/lojas', \{busca:q\}\)/);
   assert.match(cliente, /renderResultadosBusca/);
   assert.match(servidor, /l\.nome ILIKE \?/);
   assert.match(servidor, /categorias ILIKE \?/);
@@ -255,4 +255,46 @@ test('pedido Pix fica bloqueado até confirmação administrativa de teste', () 
   assert.match(cliente, /SIMULAÇÃO — NÃO É PIX REAL/);
   assert.doesNotMatch(cliente, /Pix da loja:/);
   assert.match(admin, /Confirmar Pix de teste/);
+});
+
+test('versão segura contém aprovação, estoque, cancelamento, avisos e auditoria', () => {
+  const raiz = path.join(__dirname, '..');
+  const schema = fs.readFileSync(path.join(raiz, 'db', 'schema.sql'), 'utf8');
+  const servidor = fs.readFileSync(path.join(raiz, 'server.js'), 'utf8');
+  const admin = fs.readFileSync(path.join(raiz, 'admin', 'index.html'), 'utf8');
+  for (const tabela of ['reservas_estoque', 'reembolsos', 'saques', 'notificacoes', 'auditoria_admin', 'configuracoes_cidades']) {
+    assert.match(schema, new RegExp(`CREATE TABLE IF NOT EXISTS ${tabela}`));
+  }
+  assert.match(servidor, /helmet\(/);
+  assert.match(servidor, /rateLimit\(/);
+  assert.match(servidor, /\/api\/admin\/cadastros/);
+  assert.match(servidor, /cancelarPedidoComSeguranca/);
+  assert.match(servidor, /reservarEstoque/);
+  assert.match(admin, /Verificação de cadastros/);
+  assert.match(admin, /Cancelamentos e reembolsos/);
+  assert.match(admin, /Auditoria administrativa/);
+});
+
+test('painéis mostram avisos, estoque real e rastreamento protegido', () => {
+  const raiz = path.join(__dirname, '..');
+  const cliente = fs.readFileSync(path.join(raiz, 'frontend', 'index.html'), 'utf8');
+  const loja = fs.readFileSync(path.join(raiz, 'loja', 'index.html'), 'utf8');
+  const entregador = fs.readFileSync(path.join(raiz, 'entregador', 'index.html'), 'utf8');
+  assert.match(cliente, /carregarRastreamentoPedido/);
+  assert.match(cliente, /cancelarPedidoCliente/);
+  assert.match(cliente, /carregarAvisosCliente/);
+  assert.match(loja, /novo-produto-estoque/);
+  assert.match(loja, /carregarAvisosLoja/);
+  assert.match(entregador, /carregarAvisosEntregador/);
+  assert.match(entregador, /status_cadastro==='aprovado'\)iniciarGPS/);
+});
+
+test('PWA usa cache v11 e ícones que realmente existem', () => {
+  const raiz = path.join(__dirname, '..');
+  const sw = fs.readFileSync(path.join(raiz, 'frontend', 'sw.js'), 'utf8');
+  const manifest = JSON.parse(fs.readFileSync(path.join(raiz, 'frontend', 'manifest.json'), 'utf8'));
+  assert.match(sw, /obraexpress-v11-operacao-segura/);
+  for (const icon of manifest.icons) {
+    assert.equal(fs.existsSync(path.join(raiz, 'frontend', icon.src.replace(/^\//, ''))), true, `ícone ausente: ${icon.src}`);
+  }
 });

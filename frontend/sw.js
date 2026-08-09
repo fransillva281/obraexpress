@@ -1,4 +1,4 @@
-const CACHE = 'obraexpress-v10-pix-teste';
+const CACHE = 'obraexpress-v11-operacao-segura';
 const urls = ['/', '/loja/', '/entregador/', '/admin/', '/termos.html', '/manifest.json'];
 
 self.addEventListener('install', e => {

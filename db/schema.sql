@@ -10,10 +10,15 @@ CREATE TABLE IF NOT EXISTS lojas (
   logo TEXT,
   endereco TEXT,
   bairro TEXT,
-  cidade TEXT DEFAULT 'São Luís',
-  estado TEXT DEFAULT 'MA',
+  cep TEXT,
+  cidade TEXT,
+  estado TEXT,
   latitude DOUBLE PRECISION,
   longitude DOUBLE PRECISION,
+  raio_entrega_km NUMERIC(6,2) DEFAULT 8.00,
+  fuso_horario TEXT DEFAULT 'America/Araguaina',
+  status_cadastro TEXT DEFAULT 'aprovado',
+  status_motivo TEXT,
   descricao TEXT,
   categorias TEXT,
   taxa_entrega_km DOUBLE PRECISION DEFAULT 2.00,
@@ -50,10 +55,13 @@ CREATE TABLE IF NOT EXISTS clientes (
   telefone TEXT,
   endereco_padrao TEXT,
   bairro TEXT,
-  cidade TEXT DEFAULT 'São Luís',
-  estado TEXT DEFAULT 'MA',
+  cep TEXT,
+  cidade TEXT,
+  estado TEXT,
   latitude DOUBLE PRECISION,
   longitude DOUBLE PRECISION,
+  status_cadastro TEXT DEFAULT 'aprovado',
+  status_motivo TEXT,
   data_cadastro TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -66,6 +74,9 @@ CREATE TABLE IF NOT EXISTS entregadores (
   telefone TEXT,
   veiculo TEXT,
   placa TEXT,
+  cep TEXT,
+  cidade TEXT,
+  estado TEXT,
   foto TEXT,
   chave_pix TEXT,
   disponivel INTEGER DEFAULT 1,
@@ -73,6 +84,8 @@ CREATE TABLE IF NOT EXISTS entregadores (
   longitude DOUBLE PRECISION,
   avaliacao DOUBLE PRECISION DEFAULT 5.0,
   total_entregas INTEGER DEFAULT 0,
+  status_cadastro TEXT DEFAULT 'aprovado',
+  status_motivo TEXT,
   comissao_percentual NUMERIC(5,2) DEFAULT 5.00,
   inicio_promocao TIMESTAMPTZ,
   data_cadastro TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
@@ -282,7 +295,112 @@ ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS distancia_coleta_km DOUBLE PRECISIO
 ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS distancia_total_entrega_km DOUBLE PRECISION DEFAULT 0;
 ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS pedido_minimo_aplicado NUMERIC(12,2) DEFAULT 15.00;
 ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS limite_pedido_pequeno_aplicado NUMERIC(12,2) DEFAULT 25.00;
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cancelado_por TEXT;
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS motivo_cancelamento TEXT;
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS reembolso_status TEXT DEFAULT 'nao_aplicavel';
 ALTER TABLE pedidos ALTER COLUMN status SET DEFAULT 'aguardando_confirmacao';
+
+ALTER TABLE lojas ADD COLUMN IF NOT EXISTS cep TEXT;
+ALTER TABLE lojas ADD COLUMN IF NOT EXISTS cidade TEXT;
+ALTER TABLE lojas ADD COLUMN IF NOT EXISTS estado TEXT;
+ALTER TABLE lojas ADD COLUMN IF NOT EXISTS raio_entrega_km NUMERIC(6,2) DEFAULT 8.00;
+ALTER TABLE lojas ADD COLUMN IF NOT EXISTS fuso_horario TEXT DEFAULT 'America/Araguaina';
+ALTER TABLE lojas ADD COLUMN IF NOT EXISTS status_cadastro TEXT DEFAULT 'aprovado';
+ALTER TABLE lojas ADD COLUMN IF NOT EXISTS status_motivo TEXT;
+ALTER TABLE lojas ALTER COLUMN cidade DROP DEFAULT;
+ALTER TABLE lojas ALTER COLUMN estado DROP DEFAULT;
+
+ALTER TABLE clientes ADD COLUMN IF NOT EXISTS cep TEXT;
+ALTER TABLE clientes ADD COLUMN IF NOT EXISTS cidade TEXT;
+ALTER TABLE clientes ADD COLUMN IF NOT EXISTS estado TEXT;
+ALTER TABLE clientes ADD COLUMN IF NOT EXISTS status_cadastro TEXT DEFAULT 'aprovado';
+ALTER TABLE clientes ADD COLUMN IF NOT EXISTS status_motivo TEXT;
+ALTER TABLE clientes ALTER COLUMN cidade DROP DEFAULT;
+ALTER TABLE clientes ALTER COLUMN estado DROP DEFAULT;
+
+ALTER TABLE entregadores ADD COLUMN IF NOT EXISTS cep TEXT;
+ALTER TABLE entregadores ADD COLUMN IF NOT EXISTS cidade TEXT;
+ALTER TABLE entregadores ADD COLUMN IF NOT EXISTS estado TEXT;
+ALTER TABLE entregadores ADD COLUMN IF NOT EXISTS status_cadastro TEXT DEFAULT 'aprovado';
+ALTER TABLE entregadores ADD COLUMN IF NOT EXISTS status_motivo TEXT;
+ALTER TABLE produtos ADD COLUMN IF NOT EXISTS estoque_baixo_limite INTEGER DEFAULT 5;
+
+CREATE TABLE IF NOT EXISTS reservas_estoque (
+  id SERIAL PRIMARY KEY,
+  pedido_id INTEGER NOT NULL REFERENCES pedidos(id) ON DELETE CASCADE,
+  produto_id INTEGER NOT NULL REFERENCES produtos(id) ON DELETE CASCADE,
+  quantidade INTEGER NOT NULL CHECK (quantidade > 0),
+  status TEXT NOT NULL DEFAULT 'reservado'
+    CHECK (status IN ('reservado', 'confirmado', 'consumido', 'liberado')),
+  criado_em TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  atualizado_em TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (pedido_id, produto_id)
+);
+
+CREATE TABLE IF NOT EXISTS reembolsos (
+  id SERIAL PRIMARY KEY,
+  pedido_id INTEGER UNIQUE NOT NULL REFERENCES pedidos(id) ON DELETE CASCADE,
+  solicitado_por TEXT NOT NULL,
+  motivo TEXT NOT NULL,
+  valor NUMERIC(12,2) NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'pendente'
+    CHECK (status IN ('pendente', 'aprovado', 'recusado', 'processado')),
+  observacao_admin TEXT,
+  criado_em TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  atualizado_em TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS saques (
+  id SERIAL PRIMARY KEY,
+  tipo_usuario TEXT NOT NULL CHECK (tipo_usuario IN ('loja', 'entregador')),
+  usuario_id INTEGER NOT NULL,
+  valor NUMERIC(12,2) NOT NULL CHECK (valor > 0),
+  chave_pix TEXT,
+  status TEXT NOT NULL DEFAULT 'pendente'
+    CHECK (status IN ('pendente', 'aprovado', 'recusado', 'processado')),
+  observacao_admin TEXT,
+  criado_em TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  atualizado_em TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS notificacoes (
+  id SERIAL PRIMARY KEY,
+  tipo_usuario TEXT NOT NULL CHECK (tipo_usuario IN ('cliente', 'loja', 'entregador', 'admin')),
+  usuario_id INTEGER,
+  titulo TEXT NOT NULL,
+  mensagem TEXT NOT NULL,
+  pedido_id INTEGER REFERENCES pedidos(id) ON DELETE CASCADE,
+  lida INTEGER NOT NULL DEFAULT 0,
+  criada_em TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS auditoria_admin (
+  id SERIAL PRIMARY KEY,
+  acao TEXT NOT NULL,
+  entidade TEXT NOT NULL,
+  entidade_id INTEGER,
+  detalhes TEXT,
+  ip_hash TEXT,
+  criada_em TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS configuracoes_cidades (
+  id SERIAL PRIMARY KEY,
+  cidade TEXT NOT NULL,
+  estado TEXT NOT NULL,
+  fuso_horario TEXT NOT NULL DEFAULT 'America/Araguaina',
+  ativa INTEGER NOT NULL DEFAULT 1,
+  distancia_maxima_entrega NUMERIC(6,2),
+  criado_em TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS configuracoes_cidades_unica
+  ON configuracoes_cidades (LOWER(TRIM(cidade)), UPPER(TRIM(estado)));
+CREATE INDEX IF NOT EXISTS idx_reservas_pedido_status ON reservas_estoque(pedido_id, status);
+CREATE INDEX IF NOT EXISTS idx_notificacoes_usuario ON notificacoes(tipo_usuario, usuario_id, lida, criada_em DESC);
+CREATE INDEX IF NOT EXISTS idx_saques_usuario_status ON saques(tipo_usuario, usuario_id, status, criado_em DESC);
+CREATE INDEX IF NOT EXISTS idx_lojas_localizacao_status ON lojas(estado, cidade, status_cadastro, aberto);
+CREATE INDEX IF NOT EXISTS idx_entregadores_localizacao_status ON entregadores(estado, cidade, status_cadastro, disponivel);
 
 ALTER TABLE configuracoes_plataforma ADD COLUMN IF NOT EXISTS pedido_minimo NUMERIC(12,2) NOT NULL DEFAULT 15.00;
 ALTER TABLE configuracoes_plataforma ADD COLUMN IF NOT EXISTS limite_pedido_pequeno NUMERIC(12,2) NOT NULL DEFAULT 25.00;

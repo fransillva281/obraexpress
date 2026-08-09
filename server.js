@@ -1,5 +1,7 @@
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const { rateLimit } = require('express-rate-limit');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const QRCode = require('qrcode');
@@ -31,6 +33,7 @@ const {
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+app.set('trust proxy', Number(process.env.TRUST_PROXY || 1));
 
 function requireEnvironment(name) {
   const value = process.env[name];
@@ -46,6 +49,50 @@ const PAYMENT_MODE = process.env.PAYMENT_MODE || 'mock';
 
 const TERMOS_VERSION = '2026-08-04.1';
 const PRIVACIDADE_VERSION = '2026-08-04.1';
+const STATUS_CADASTRO = Object.freeze({
+  PENDENTE: 'pendente',
+  APROVADO: 'aprovado',
+  RECUSADO: 'recusado',
+  SUSPENSO: 'suspenso'
+});
+
+function textoSeguro(valor, limite = 255) {
+  return String(valor ?? '')
+    .replace(/[\u0000-\u001F\u007F]/g, ' ')
+    .replace(/</g, '‹').replace(/>/g, '›')
+    .trim().slice(0, limite);
+}
+
+function emailValido(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim()) && String(email).length <= 254;
+}
+
+function senhaValida(senha) {
+  return typeof senha === 'string' && senha.length >= 8 && senha.length <= 128;
+}
+
+function apenasDigitos(valor) {
+  return String(valor || '').replace(/\D/g, '');
+}
+
+function cepValido(cep) {
+  return apenasDigitos(cep).length === 8;
+}
+
+function ufValida(estado) {
+  return /^[A-Z]{2}$/.test(String(estado || '').trim().toUpperCase());
+}
+
+function documentoValido(valor, tamanho) {
+  const documento = apenasDigitos(valor);
+  return documento.length === tamanho && !/^(\d)\1+$/.test(documento);
+}
+
+function imagemValida(foto) {
+  if (!foto) return true;
+  if (typeof foto !== 'string' || foto.length > 2_800_000) return false;
+  return /^data:image\/(jpeg|jpg|png|webp);base64,/i.test(foto) || /^https:\/\//i.test(foto);
+}
 
 function dadosPublicosEmpresa() {
   const dados = {
@@ -104,9 +151,11 @@ function calcularDistanciaRetaKm(origemLat, origemLng, destinoLat, destinoLng) {
   return raioTerra * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function horarioDePico(agora = new Date()) {
+function horarioDePico(agora = new Date(), fusoHorario = FUSO_PLATAFORMA) {
+  let fuso = textoSeguro(fusoHorario, 64) || FUSO_PLATAFORMA;
+  try { new Intl.DateTimeFormat('pt-BR', { timeZone: fuso }).format(agora); } catch { fuso = FUSO_PLATAFORMA; }
   const partes = new Intl.DateTimeFormat('pt-BR', {
-    timeZone: FUSO_PLATAFORMA,
+    timeZone: fuso,
     hour: '2-digit',
     hour12: false
   }).formatToParts(agora);
@@ -148,18 +197,31 @@ async function calcularCotacaoFrete(loja, latitudeEntrega, longitudeEntrega, ago
     throw Object.assign(new Error('Use o botão de GPS para marcar o local da entrega'), { status: 400 });
   }
   const config = await obterConfiguracaoFrete();
+  const configCidade = loja.cidade && loja.estado ? await dbGet(`SELECT ativa, fuso_horario, distancia_maxima_entrega
+    FROM configuracoes_cidades WHERE LOWER(TRIM(cidade)) = LOWER(TRIM(?))
+      AND UPPER(TRIM(estado)) = UPPER(TRIM(?)) LIMIT 1`, [loja.cidade, loja.estado]) : null;
+  if (configCidade && !Number(configCidade.ativa)) {
+    throw Object.assign(new Error('As entregas estão temporariamente pausadas nesta cidade'), { status: 409 });
+  }
   if (!Number(config.entregas_ativas) || config.condicao_climatica === 'perigoso') {
     throw Object.assign(new Error('Entregas temporariamente pausadas por segurança'), { status: 409 });
   }
   const distanciaReta = calcularDistanciaRetaKm(loja.latitude, loja.longitude, latitudeEntrega, longitudeEntrega);
   const distanciaEstimada = Math.max(0.5, distanciaReta * Number(config.fator_rota || 1.2));
+  const limiteLoja = Math.min(
+    Number(loja.raio_entrega_km || 30),
+    Number(configCidade?.distancia_maxima_entrega || config.distancia_maxima_entrega || 8)
+  );
+  if (distanciaEstimada > limiteLoja) {
+    throw Object.assign(new Error(`Endereço fora da área desta loja. Limite: ${limiteLoja.toFixed(1)} km.`), { status: 400 });
+  }
   const faixaFrete = calcularFretePorFaixa(distanciaEstimada, config);
   if (!faixaFrete.disponivel) {
     throw Object.assign(new Error(`Endereço fora da área de entrega por moto. Limite atual: ${faixaFrete.distanciaMaxima} km da loja.`), { status: 400 });
   }
   const taxaBase = faixaFrete.valor;
   const adicionalClima = config.condicao_climatica === 'chuva' ? Number(config.adicional_chuva_percentual || 0) : 0;
-  const pico = horarioDePico(agora);
+  const pico = horarioDePico(agora, configCidade?.fuso_horario || loja.fuso_horario || FUSO_PLATAFORMA);
   const adicionalPico = pico ? Number(config.adicional_pico_percentual || 0) : 0;
   const adicionaisAplicados = Math.min(adicionalClima + adicionalPico, Number(config.limite_adicionais_percentual || 0), 10);
   return {
@@ -200,9 +262,43 @@ function calcularOfertaEntregador(pedido, entregador, configuracao) {
   };
 }
 
-// Middleware
-app.use(cors());
-app.use(express.json({ limit: '50mb' }));
+// Segurança HTTP. O front oficial usa a mesma origem; domínios adicionais
+// precisam ser declarados explicitamente em CORS_ORIGINS.
+const origensPermitidas = new Set(
+  String(process.env.CORS_ORIGINS || process.env.PUBLIC_URL || 'https://obraexpress-1.onrender.com,http://localhost:3000')
+    .split(',').map(item => item.trim()).filter(Boolean)
+);
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false
+}));
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || origensPermitidas.has(origin)) return callback(null, true);
+    return callback(new Error('Origem não autorizada'));
+  },
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+app.use(express.json({ limit: process.env.JSON_LIMIT || '3mb', strict: true }));
+
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 180,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Muitas solicitações. Aguarde um minuto e tente novamente.' }
+});
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: { error: 'Muitas tentativas de acesso. Aguarde 15 minutos.' }
+});
+app.use('/api', apiLimiter);
+app.use(['/api/admin/login', '/api/clientes/login', '/api/lojas/login', '/api/entregadores/login'], loginLimiter);
 app.use(express.static(path.join(__dirname, 'frontend')));
 app.use('/loja', express.static(path.join(__dirname, 'loja')));
 app.use('/entregador', express.static(path.join(__dirname, 'entregador')));
@@ -239,6 +335,12 @@ async function autenticarUsuario(req, res, next, tipoEsperado) {
   try {
     req.usuario = jwt.verify(token, JWT_SECRET);
     if (req.usuario.tipo !== tipoEsperado) return res.status(403).json({ error: `Acesso apenas para ${tipoEsperado}` });
+    const tabelaConta = { cliente: 'clientes', loja: 'lojas', entregador: 'entregadores' }[req.usuario.tipo];
+    const situacao = tabelaConta ? await dbGet(`SELECT status_cadastro, status_motivo FROM ${tabelaConta} WHERE id = ?`, [req.usuario.id]) : null;
+    if (!situacao) return res.status(404).json({ error: 'Conta não encontrada' });
+    if (situacao.status_cadastro === STATUS_CADASTRO.SUSPENSO) {
+      return res.status(403).json({ error: 'Conta suspensa. Consulte o suporte.', motivo: situacao.status_motivo || null });
+    }
     if (!(await possuiAceiteAtual(req.usuario.tipo, req.usuario.id))) {
       return res.status(428).json({
         error: 'Leia e aceite os Termos e a Política de Privacidade para continuar',
@@ -273,6 +375,122 @@ function authAdmin(req, res, next) {
     if (req.usuario.tipo !== 'admin') return res.status(403).json({ error: 'Acesso apenas para admin' });
     next();
   } catch { res.status(401).json({ error: 'Token inválido' }); }
+}
+
+function authQualquer(req, res, next) {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).json({ error: 'Token não fornecido' });
+  try {
+    req.usuario = jwt.verify(token, JWT_SECRET);
+    if (!['cliente', 'loja', 'entregador', 'admin'].includes(req.usuario.tipo)) {
+      return res.status(403).json({ error: 'Tipo de conta inválido' });
+    }
+    next();
+  } catch { res.status(401).json({ error: 'Token inválido' }); }
+}
+
+async function exigirCadastroAprovado(req, res, next) {
+  if (!['loja', 'entregador'].includes(req.usuario?.tipo)) return next();
+  const tabela = req.usuario.tipo === 'loja' ? 'lojas' : 'entregadores';
+  const conta = await dbGet(`SELECT status_cadastro, status_motivo FROM ${tabela} WHERE id = ?`, [req.usuario.id]);
+  if (!conta) return res.status(404).json({ error: 'Conta não encontrada' });
+  if (conta.status_cadastro !== STATUS_CADASTRO.APROVADO) {
+    return res.status(403).json({
+      error: conta.status_cadastro === STATUS_CADASTRO.SUSPENSO
+        ? 'Conta suspensa. Consulte o suporte.'
+        : 'Cadastro aguardando aprovação administrativa.',
+      codigo: 'CADASTRO_NAO_APROVADO',
+      status_cadastro: conta.status_cadastro,
+      motivo: conta.status_motivo || null
+    });
+  }
+  next();
+}
+
+async function criarNotificacao(executor, { tipoUsuario, usuarioId = null, titulo, mensagem, pedidoId = null }) {
+  await executor.run(`INSERT INTO notificacoes
+    (tipo_usuario, usuario_id, titulo, mensagem, pedido_id)
+    VALUES (?, ?, ?, ?, ?)`,
+  [tipoUsuario, usuarioId, textoSeguro(titulo, 120), textoSeguro(mensagem, 500), pedidoId]);
+}
+
+async function registrarAuditoria(req, acao, entidade, entidadeId, detalhes = '') {
+  await dbRun(`INSERT INTO auditoria_admin (acao, entidade, entidade_id, detalhes, ip_hash)
+    VALUES (?, ?, ?, ?, ?)`,
+  [textoSeguro(acao, 80), textoSeguro(entidade, 80), entidadeId || null, textoSeguro(detalhes, 1000), hashIpRequisicao(req)]);
+}
+
+function itensDoPedido(pedido) {
+  try {
+    const itens = JSON.parse(pedido.itens || '[]');
+    if (!Array.isArray(itens)) throw new Error();
+    return itens;
+  } catch {
+    throw Object.assign(new Error('Itens do pedido inválidos'), { status: 500 });
+  }
+}
+
+async function reservarEstoque(tx, pedido) {
+  const existente = await tx.get('SELECT id FROM reservas_estoque WHERE pedido_id = ? LIMIT 1', [pedido.id]);
+  if (existente) return;
+  for (const item of itensDoPedido(pedido)) {
+    const produto = await tx.get('SELECT id, nome, estoque, estoque_baixo_limite, ativo FROM produtos WHERE id = ? AND loja_id = ? FOR UPDATE', [item.id, pedido.loja_id]);
+    const quantidade = Number(item.qty);
+    if (!produto || !Number(produto.ativo)) {
+      throw Object.assign(new Error(`${item.nome || 'Produto'} não está mais disponível`), { status: 409 });
+    }
+    if (!Number.isInteger(quantidade) || quantidade < 1 || Number(produto.estoque) < quantidade) {
+      throw Object.assign(new Error(`Estoque insuficiente para ${produto.nome}`), { status: 409 });
+    }
+    await tx.run('UPDATE produtos SET estoque = estoque - ? WHERE id = ?', [quantidade, produto.id]);
+    await tx.run(`INSERT INTO reservas_estoque (pedido_id, produto_id, quantidade, status)
+      VALUES (?, ?, ?, 'reservado')`, [pedido.id, produto.id, quantidade]);
+    if (Number(produto.estoque) - quantidade <= Number(produto.estoque_baixo_limite || 5)) {
+      await criarNotificacao(tx, { tipoUsuario: 'loja', usuarioId: pedido.loja_id, titulo: 'Estoque baixo', mensagem: `${produto.nome} ficou com ${Number(produto.estoque) - quantidade} unidade(s).`, pedidoId: pedido.id });
+    }
+  }
+}
+
+async function liberarReservaEstoque(tx, pedidoId) {
+  const reservas = await tx.all(`SELECT id, produto_id, quantidade FROM reservas_estoque
+    WHERE pedido_id = ? AND status IN ('reservado', 'confirmado') FOR UPDATE`, [pedidoId]);
+  for (const reserva of reservas) {
+    await tx.run('UPDATE produtos SET estoque = estoque + ? WHERE id = ?', [reserva.quantidade, reserva.produto_id]);
+    await tx.run("UPDATE reservas_estoque SET status = 'liberado', atualizado_em = CURRENT_TIMESTAMP WHERE id = ?", [reserva.id]);
+  }
+}
+
+async function confirmarReservaEstoque(tx, pedidoId) {
+  await tx.run("UPDATE reservas_estoque SET status = 'confirmado', atualizado_em = CURRENT_TIMESTAMP WHERE pedido_id = ? AND status = 'reservado'", [pedidoId]);
+}
+
+async function consumirReservaEstoque(tx, pedidoId) {
+  await tx.run("UPDATE reservas_estoque SET status = 'consumido', atualizado_em = CURRENT_TIMESTAMP WHERE pedido_id = ? AND status IN ('reservado', 'confirmado')", [pedidoId]);
+}
+
+async function cancelarPedidoComSeguranca(tx, pedido, solicitadoPor, motivo) {
+  if (['entregue', 'cancelado'].includes(pedido.status)) {
+    throw Object.assign(new Error('Este pedido não pode mais ser cancelado'), { status: 409 });
+  }
+  if (['separado', 'em_coleta', 'saiu_entrega'].includes(pedido.status)) {
+    throw Object.assign(new Error('O pedido já está em preparação ou entrega. Solicite ajuda ao suporte.'), { status: 409 });
+  }
+  await liberarReservaEstoque(tx, pedido.id);
+  let reembolsoStatus = 'nao_aplicavel';
+  if (Number(pedido.pix_pago)) {
+    reembolsoStatus = 'pendente';
+    await tx.run(`INSERT INTO reembolsos (pedido_id, solicitado_por, motivo, valor, status)
+      VALUES (?, ?, ?, ?, 'pendente')
+      ON CONFLICT (pedido_id) DO UPDATE SET motivo = EXCLUDED.motivo, atualizado_em = CURRENT_TIMESTAMP`,
+    [pedido.id, solicitadoPor, textoSeguro(motivo, 500), Number(pedido.total_final)]);
+  } else {
+    await tx.run("UPDATE pagamentos SET status = 'cancelado', atualizado_em = CURRENT_TIMESTAMP WHERE pedido_id = ? AND status = 'aguardando'", [pedido.id]);
+  }
+  await tx.run(`UPDATE pedidos SET status = 'cancelado', cancelado_por = ?, motivo_cancelamento = ?,
+    reembolso_status = ? WHERE id = ?`,
+  [solicitadoPor, textoSeguro(motivo, 500), reembolsoStatus, pedido.id]);
+  await criarNotificacao(tx, { tipoUsuario: 'cliente', usuarioId: pedido.cliente_id, titulo: 'Pedido cancelado', mensagem: Number(pedido.pix_pago) ? 'Cancelamento registrado. O reembolso está em análise.' : 'O pedido foi cancelado.', pedidoId: pedido.id });
+  await criarNotificacao(tx, { tipoUsuario: 'loja', usuarioId: pedido.loja_id, titulo: 'Pedido cancelado', mensagem: `Pedido #${pedido.id} cancelado.`, pedidoId: pedido.id });
 }
 
 // ============ TERMOS, REGRAS E PRIVACIDADE ============
@@ -337,24 +555,61 @@ app.post('/api/legal/aceite', async (req, res) => {
   });
 });
 
+// ============ NOTIFICAÇÕES ============
+app.get('/api/notificacoes', authQualquer, async (req, res) => {
+  const notificacoes = await dbAll(`SELECT id, titulo, mensagem, pedido_id, lida, criada_em
+    FROM notificacoes
+    WHERE tipo_usuario = ? AND usuario_id = ?
+    ORDER BY criada_em DESC LIMIT 50`, [req.usuario.tipo, req.usuario.id]);
+  res.json({ notificacoes, nao_lidas: notificacoes.filter(item => !Number(item.lida)).length });
+});
+
+app.put('/api/notificacoes/:id/lida', authQualquer, async (req, res) => {
+  await dbRun(`UPDATE notificacoes SET lida = 1
+    WHERE id = ? AND tipo_usuario = ? AND usuario_id = ?`,
+  [req.params.id, req.usuario.tipo, req.usuario.id]);
+  res.json({ success: true });
+});
+
+app.put('/api/notificacoes/lidas/todas', authQualquer, async (req, res) => {
+  await dbRun(`UPDATE notificacoes SET lida = 1
+    WHERE tipo_usuario = ? AND usuario_id = ?`,
+  [req.usuario.tipo, req.usuario.id]);
+  res.json({ success: true });
+});
+
 // ============ LOJAS API ============
 app.post('/api/lojas/cadastro', async (req, res) => {
-  const { nome, email, senha, telefone, endereco, bairro, latitude, longitude, descricao, categorias, taxa_entrega_km, chave_pix, plano, tempo_entrega_min } = req.body;
+  const { nome, cnpj, email, senha, telefone, endereco, bairro, cep, cidade, estado, latitude, longitude, descricao, categorias, taxa_entrega_km, chave_pix, plano, tempo_entrega_min, raio_entrega_km } = req.body;
   try {
-    if (!nome || !email || !senha) return res.status(400).json({ error: 'Nome, email e senha são obrigatórios' });
+    if (!nome || !email || !senha || !cnpj) return res.status(400).json({ error: 'Nome, CNPJ, email e senha são obrigatórios' });
+    if (!emailValido(email)) return res.status(400).json({ error: 'Informe um email válido' });
+    if (!senhaValida(senha)) return res.status(400).json({ error: 'A senha precisa ter entre 8 e 128 caracteres' });
+    if (!documentoValido(cnpj, 14)) return res.status(400).json({ error: 'Informe um CNPJ válido, com 14 números' });
+    if (!cepValido(cep) || !cidade || !ufValida(estado)) return res.status(400).json({ error: 'Informe CEP, cidade e estado válidos' });
     if (!validarAceiteNoCadastro(req.body)) return res.status(400).json({ error: 'Leia e aceite os Termos e a Política de Privacidade' });
     const planoEscolhido = normalizarPlanoLoja(plano);
     const hash = bcrypt.hashSync(senha, 10);
     const taxaKm = Number(taxa_entrega_km || 2);
     if (!coordenadaValida(latitude, longitude)) return res.status(400).json({ error: 'Use o botão de GPS para marcar a localização da loja' });
     const result = await dbTransaction(async tx => {
-      const insercao = await tx.run('INSERT INTO lojas (nome, email, senha, telefone, endereco, bairro, latitude, longitude, descricao, categorias, taxa_entrega_km, chave_pix, plano, comissao_percentual, tempo_entrega_min) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [nome, email, hash, telefone, endereco, bairro, Number(latitude), Number(longitude), descricao, categorias, taxaKm, chave_pix || null, planoEscolhido, 5, tempo_entrega_min || '30-60 min']);
+      const insercao = await tx.run(`INSERT INTO lojas
+        (nome, cnpj, email, senha, telefone, endereco, bairro, cep, cidade, estado,
+         latitude, longitude, descricao, categorias, taxa_entrega_km, chave_pix, plano,
+         comissao_percentual, tempo_entrega_min, raio_entrega_km, status_cadastro)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendente')`,
+      [textoSeguro(nome, 160), apenasDigitos(cnpj), String(email).trim().toLowerCase(), hash,
+        textoSeguro(telefone, 30), textoSeguro(endereco, 300), textoSeguro(bairro, 120), apenasDigitos(cep),
+        textoSeguro(cidade, 120), String(estado).trim().toUpperCase(), Number(latitude), Number(longitude),
+        textoSeguro(descricao, 1000), textoSeguro(categorias, 1000), taxaKm, textoSeguro(chave_pix, 180) || null,
+        planoEscolhido, 5, textoSeguro(tempo_entrega_min, 40) || '30-60 min',
+        Math.min(Math.max(Number(raio_entrega_km || 8), 1), 30)]);
       await registrarAceiteTermos('loja', insercao.lastID, req, tx);
+      await criarNotificacao(tx, { tipoUsuario: 'admin', titulo: 'Nova loja aguardando aprovação', mensagem: `${textoSeguro(nome, 160)} enviou um cadastro para análise.` });
       return insercao;
     });
     const token = jwt.sign({ id: result.lastID, tipo: 'loja' }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ success: true, id: result.lastID, token, termos_pendentes: false, loja: { id: result.lastID, nome, email, plano: planoEscolhido, comissao_percentual: 5, taxa_entrega_km: taxaKm, chave_pix: chave_pix || null, latitude: Number(latitude), longitude: Number(longitude), inicio_promocao: null } });
+    res.json({ success: true, id: result.lastID, token, termos_pendentes: false, status_cadastro: 'pendente', message: 'Cadastro enviado para aprovação.', loja: { id: result.lastID, nome, email, plano: planoEscolhido, comissao_percentual: 5, taxa_entrega_km: taxaKm, chave_pix: chave_pix || null, latitude: Number(latitude), longitude: Number(longitude), inicio_promocao: null, status_cadastro: 'pendente' } });
   } catch (e) {
     if (isUniqueViolation(e)) return res.status(400).json({ error: 'Email já cadastrado' });
     console.error('Erro ao cadastrar loja:', e);
@@ -364,32 +619,49 @@ app.post('/api/lojas/cadastro', async (req, res) => {
 
 app.post('/api/lojas/login', async (req, res) => {
   const { email, senha } = req.body;
-  const loja = await dbGet('SELECT * FROM lojas WHERE email = ?', [email]);
+  if (!emailValido(email) || typeof senha !== 'string') return res.status(400).json({ error: 'Informe email e senha' });
+  const loja = await dbGet('SELECT * FROM lojas WHERE email = ?', [String(email).trim().toLowerCase()]);
   if (!loja) return res.status(401).json({ error: 'Email não encontrado' });
   if (!bcrypt.compareSync(senha, loja.senha)) return res.status(401).json({ error: 'Senha incorreta' });
+  if (loja.status_cadastro === STATUS_CADASTRO.SUSPENSO) return res.status(403).json({ error: 'Conta suspensa. Consulte o suporte.', motivo: loja.status_motivo || null });
   loja.comissao_percentual = calcularPercentualPromocional(loja.inicio_promocao);
   await dbRun('UPDATE lojas SET comissao_percentual = ? WHERE id = ?', [loja.comissao_percentual, loja.id]);
   const token = jwt.sign({ id: loja.id, tipo: 'loja' }, JWT_SECRET, { expiresIn: '7d' });
-  res.json({ success: true, token, termos_pendentes: !(await possuiAceiteAtual('loja', loja.id)), loja: { id: loja.id, nome: loja.nome, email: loja.email, logo: loja.logo, aberto: loja.aberto, taxa_entrega_km: loja.taxa_entrega_km, chave_pix: loja.chave_pix, plano: normalizarPlanoLoja(loja.plano), comissao_percentual: Number(loja.comissao_percentual), inicio_promocao: loja.inicio_promocao, latitude: loja.latitude, longitude: loja.longitude } });
+  res.json({ success: true, token, termos_pendentes: !(await possuiAceiteAtual('loja', loja.id)), status_cadastro: loja.status_cadastro, loja: { id: loja.id, nome: loja.nome, email: loja.email, logo: loja.logo, aberto: loja.aberto, taxa_entrega_km: loja.taxa_entrega_km, chave_pix: loja.chave_pix, plano: normalizarPlanoLoja(loja.plano), comissao_percentual: Number(loja.comissao_percentual), inicio_promocao: loja.inicio_promocao, latitude: loja.latitude, longitude: loja.longitude, cidade: loja.cidade, estado: loja.estado, cep: loja.cep, raio_entrega_km: loja.raio_entrega_km, status_cadastro: loja.status_cadastro, status_motivo: loja.status_motivo } });
 });
 
 app.get('/api/lojas', async (req, res) => {
-  const { categoria, bairro, busca } = req.query;
-  let sql = 'SELECT id, nome, logo, descricao, categorias, endereco, bairro, taxa_entrega_km, entrega_gratis_ate, tempo_entrega_min, aberto, latitude, longitude, plano, comissao_percentual FROM lojas WHERE aberto = 1';
+  const { categoria, bairro, busca, cidade, estado, latitude, longitude } = req.query;
+  let sql = `SELECT id, nome, logo, descricao, categorias, endereco, bairro, cep, cidade, estado,
+    taxa_entrega_km, entrega_gratis_ate, tempo_entrega_min, aberto, latitude, longitude,
+    raio_entrega_km, plano, comissao_percentual
+    FROM lojas WHERE aberto = 1 AND status_cadastro = 'aprovado'`;
   const params = [];
   if (categoria) { sql += ' AND categorias ILIKE ?'; params.push(`%${categoria}%`); }
   if (bairro) { sql += ' AND bairro ILIKE ?'; params.push(`%${bairro}%`); }
+  if (cidade) { sql += ' AND cidade ILIKE ?'; params.push(textoSeguro(cidade, 120)); }
+  if (estado) { sql += ' AND UPPER(estado) = ?'; params.push(String(estado).trim().toUpperCase()); }
   if (busca) {
     sql += ' AND (nome ILIKE ? OR descricao ILIKE ? OR categorias ILIKE ? OR bairro ILIKE ?)';
     params.push(`%${busca}%`, `%${busca}%`, `%${busca}%`, `%${busca}%`);
   }
   sql += ' ORDER BY nome';
-  const lojas = await dbAll(sql, params);
+  let lojas = await dbAll(sql, params);
+  if (coordenadaValida(latitude, longitude)) {
+    lojas = lojas.map(loja => ({
+      ...loja,
+      distancia_km: Math.round(calcularDistanciaRetaKm(latitude, longitude, loja.latitude, loja.longitude) * 12) / 10
+    })).filter(loja => Number.isFinite(loja.distancia_km) && loja.distancia_km <= Number(loja.raio_entrega_km || 8))
+      .sort((a, b) => a.distancia_km - b.distancia_km);
+  }
   res.json({ lojas });
 });
 
 app.get('/api/lojas/:id', async (req, res) => {
-  const loja = await dbGet('SELECT id, nome, logo, descricao, categorias, endereco, bairro, cidade, estado, telefone, whatsapp, chave_pix, taxa_entrega_km, entrega_gratis_ate, tempo_entrega_min, aberto, latitude, longitude, plano, comissao_percentual, inicio_promocao FROM lojas WHERE id = ?', [req.params.id]);
+  const loja = await dbGet(`SELECT id, nome, logo, descricao, categorias, endereco, bairro, cep,
+    cidade, estado, telefone, whatsapp, taxa_entrega_km, entrega_gratis_ate, tempo_entrega_min,
+    aberto, latitude, longitude, raio_entrega_km, plano, comissao_percentual, inicio_promocao
+    FROM lojas WHERE id = ? AND status_cadastro = 'aprovado'`, [req.params.id]);
   if (!loja) return res.status(404).json({ error: 'Loja não encontrada' });
   loja.comissao_percentual = calcularPercentualPromocional(loja.inicio_promocao);
   const produtos = await dbAll(`SELECT p.*,
@@ -405,7 +677,7 @@ app.get('/api/lojas/:id', async (req, res) => {
 
 app.put('/api/lojas/:id', authLojas, async (req, res) => {
   if (req.usuario.id != req.params.id) return res.status(403).json({ error: 'Permissão negada' });
-  const { nome, telefone, whatsapp, chave_pix, endereco, bairro, latitude, longitude, descricao, categorias, taxa_entrega_km, entrega_gratis_ate, tempo_entrega_min, aberto, logo, plano } = req.body;
+  const { nome, telefone, whatsapp, chave_pix, endereco, bairro, cep, cidade, estado, latitude, longitude, descricao, categorias, taxa_entrega_km, entrega_gratis_ate, tempo_entrega_min, aberto, logo, plano, raio_entrega_km } = req.body;
   const updates = [];
   const params = [];
   if (nome !== undefined) { updates.push('nome = ?'); params.push(nome); }
@@ -414,6 +686,15 @@ app.put('/api/lojas/:id', authLojas, async (req, res) => {
   if (chave_pix !== undefined) { updates.push('chave_pix = ?'); params.push(chave_pix); }
   if (endereco !== undefined) { updates.push('endereco = ?'); params.push(endereco); }
   if (bairro !== undefined) { updates.push('bairro = ?'); params.push(bairro); }
+  if (cep !== undefined) {
+    if (!cepValido(cep)) return res.status(400).json({ error: 'CEP inválido' });
+    updates.push('cep = ?'); params.push(apenasDigitos(cep));
+  }
+  if (cidade !== undefined) { updates.push('cidade = ?'); params.push(textoSeguro(cidade, 120)); }
+  if (estado !== undefined) {
+    if (!ufValida(estado)) return res.status(400).json({ error: 'Estado inválido' });
+    updates.push('estado = ?'); params.push(String(estado).trim().toUpperCase());
+  }
   if (latitude !== undefined) { updates.push('latitude = ?'); params.push(latitude); }
   if (longitude !== undefined) { updates.push('longitude = ?'); params.push(longitude); }
   if (descricao !== undefined) { updates.push('descricao = ?'); params.push(descricao); }
@@ -422,8 +703,16 @@ app.put('/api/lojas/:id', authLojas, async (req, res) => {
   if (entrega_gratis_ate !== undefined) { updates.push('entrega_gratis_ate = ?'); params.push(entrega_gratis_ate); }
   if (tempo_entrega_min !== undefined) { updates.push('tempo_entrega_min = ?'); params.push(tempo_entrega_min); }
   if (aberto !== undefined) { updates.push('aberto = ?'); params.push(aberto ? 1 : 0); }
-  if (logo !== undefined) { updates.push('logo = ?'); params.push(logo); }
+  if (logo !== undefined) {
+    if (!imagemValida(logo)) return res.status(400).json({ error: 'Imagem inválida ou maior que 2 MB' });
+    updates.push('logo = ?'); params.push(logo);
+  }
   if (plano !== undefined) { updates.push('plano = ?'); params.push(normalizarPlanoLoja(plano)); }
+  if (raio_entrega_km !== undefined) {
+    const raio = Number(raio_entrega_km);
+    if (!Number.isFinite(raio) || raio < 1 || raio > 30) return res.status(400).json({ error: 'Raio de entrega inválido' });
+    updates.push('raio_entrega_km = ?'); params.push(raio);
+  }
   if (updates.length === 0) return res.status(400).json({ error: 'Nada para atualizar' });
   params.push(req.params.id);
   await dbRun(`UPDATE lojas SET ${updates.join(', ')} WHERE id = ?`, params);
@@ -431,17 +720,20 @@ app.put('/api/lojas/:id', authLojas, async (req, res) => {
 });
 
 // ============ PRODUTOS API ============
-app.post('/api/produtos', authLojas, async (req, res) => {
+app.post('/api/produtos', authLojas, exigirCadastroAprovado, async (req, res) => {
   const { loja_id, nome, descricao, preco, foto, categoria, marca, unidade, estoque } = req.body;
   if (req.usuario.id != loja_id) return res.status(403).json({ error: 'Permissão negada' });
   if (!nome || !preco || Number(preco) <= 0) return res.status(400).json({ error: 'Informe o nome e um preço válido' });
   if (!categoria) return res.status(400).json({ error: 'Escolha uma categoria' });
+  const estoqueInicial = estoque === undefined ? 0 : Number(estoque);
+  if (!Number.isInteger(estoqueInicial) || estoqueInicial < 0 || estoqueInicial > 1000000) return res.status(400).json({ error: 'Informe uma quantidade de estoque válida' });
+  if (!imagemValida(foto)) return res.status(400).json({ error: 'Imagem inválida ou maior que 2 MB' });
   try {
     const loja = await dbGet('SELECT id FROM lojas WHERE id = ?', [loja_id]);
     if (!loja) return res.status(404).json({ error: 'A loja desta sessão não foi encontrada no banco atual. Faça o cadastro novamente.' });
     const categoriaOficial = await dbGet('SELECT nome FROM categorias WHERE LOWER(TRIM(nome)) = LOWER(TRIM(?)) AND COALESCE(ativa, 1) = 1', [categoria]);
     if (!categoriaOficial) return res.status(400).json({ error: 'Categoria inválida. Escolha uma opção da lista.' });
-    const result = await dbRun('INSERT INTO produtos (loja_id, nome, descricao, preco, foto, categoria, marca, unidade, estoque) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [loja_id, nome, descricao || null, Number(preco), foto || null, categoriaOficial.nome, marca || null, unidade || 'un', estoque || 999]);
+    const result = await dbRun('INSERT INTO produtos (loja_id, nome, descricao, preco, foto, categoria, marca, unidade, estoque) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [loja_id, textoSeguro(nome, 180), textoSeguro(descricao, 1000) || null, Number(preco), foto || null, categoriaOficial.nome, textoSeguro(marca, 120) || null, textoSeguro(unidade, 30) || 'un', estoqueInicial]);
     const produto = await dbGet('SELECT * FROM produtos WHERE id = ?', [result.lastID]);
     if (!produto) return res.status(500).json({ error: 'O produto não foi confirmado no banco de dados' });
     res.json({ success: true, id: result.lastID, produto });
@@ -451,11 +743,12 @@ app.post('/api/produtos', authLojas, async (req, res) => {
   }
 });
 
-app.put('/api/produtos/:id', authLojas, async (req, res) => {
+app.put('/api/produtos/:id', authLojas, exigirCadastroAprovado, async (req, res) => {
   const produto = await dbGet('SELECT * FROM produtos WHERE id = ?', [req.params.id]);
   if (!produto) return res.status(404).json({ error: 'Produto não encontrado' });
   if (req.usuario.id != produto.loja_id) return res.status(403).json({ error: 'Permissão negada' });
   const { nome, descricao, preco, foto, categoria, marca, unidade, estoque, ativo, destaque } = req.body;
+  if (foto !== undefined && !imagemValida(foto)) return res.status(400).json({ error: 'Imagem inválida ou maior que 2 MB' });
   const updates = []; const params = [];
   if (nome !== undefined) { updates.push('nome = ?'); params.push(nome); }
   if (descricao !== undefined) { updates.push('descricao = ?'); params.push(descricao); }
@@ -468,7 +761,11 @@ app.put('/api/produtos/:id', authLojas, async (req, res) => {
   }
   if (marca !== undefined) { updates.push('marca = ?'); params.push(marca); }
   if (unidade !== undefined) { updates.push('unidade = ?'); params.push(unidade); }
-  if (estoque !== undefined) { updates.push('estoque = ?'); params.push(estoque); }
+  if (estoque !== undefined) {
+    const quantidade = Number(estoque);
+    if (!Number.isInteger(quantidade) || quantidade < 0 || quantidade > 1000000) return res.status(400).json({ error: 'Quantidade de estoque inválida' });
+    updates.push('estoque = ?'); params.push(quantidade);
+  }
   if (ativo !== undefined) { updates.push('ativo = ?'); params.push(ativo ? 1 : 0); }
   if (destaque !== undefined) { updates.push('destaque = ?'); params.push(destaque ? 1 : 0); }
   if (updates.length === 0) return res.status(400).json({ error: 'Nada para atualizar' });
@@ -477,7 +774,7 @@ app.put('/api/produtos/:id', authLojas, async (req, res) => {
   res.json({ success: true });
 });
 
-app.delete('/api/produtos/:id', authLojas, async (req, res) => {
+app.delete('/api/produtos/:id', authLojas, exigirCadastroAprovado, async (req, res) => {
   const produto = await dbGet('SELECT * FROM produtos WHERE id = ?', [req.params.id]);
   if (!produto) return res.status(404).json({ error: 'Produto não encontrado' });
   if (req.usuario.id != produto.loja_id) return res.status(403).json({ error: 'Permissão negada' });
@@ -486,16 +783,20 @@ app.delete('/api/produtos/:id', authLojas, async (req, res) => {
 });
 
 app.get('/api/produtos', async (req, res) => {
-  const { categoria, loja_id, busca, ordem } = req.query;
-  let sql = `SELECT p.*, l.nome as loja_nome, l.logo as loja_logo, l.bairro as loja_bairro
+  const { categoria, loja_id, busca, ordem, cidade, estado, latitude, longitude } = req.query;
+  let sql = `SELECT p.*, l.nome as loja_nome, l.logo as loja_logo, l.bairro as loja_bairro,
+    l.cidade as loja_cidade, l.estado as loja_estado, l.latitude as loja_latitude,
+    l.longitude as loja_longitude, l.raio_entrega_km
     FROM produtos p
     JOIN lojas l ON p.loja_id = l.id
     JOIN categorias c ON LOWER(TRIM(c.nome)) = LOWER(TRIM(p.categoria))
       AND COALESCE(c.ativa, 1) = 1
-    WHERE p.ativo = 1 AND l.aberto = 1`;
+    WHERE p.ativo = 1 AND p.estoque > 0 AND l.aberto = 1 AND l.status_cadastro = 'aprovado'`;
   const params = [];
   if (categoria) { sql += ' AND LOWER(TRIM(p.categoria)) = LOWER(TRIM(?))'; params.push(categoria); }
   if (loja_id) { sql += ' AND p.loja_id = ?'; params.push(loja_id); }
+  if (cidade) { sql += ' AND l.cidade ILIKE ?'; params.push(textoSeguro(cidade, 120)); }
+  if (estado) { sql += ' AND UPPER(l.estado) = ?'; params.push(String(estado).trim().toUpperCase()); }
   if (busca) {
     sql += ' AND (p.nome ILIKE ? OR p.descricao ILIKE ? OR p.marca ILIKE ? OR p.categoria ILIKE ? OR l.nome ILIKE ?)';
     params.push(`%${busca}%`, `%${busca}%`, `%${busca}%`, `%${busca}%`, `%${busca}%`);
@@ -503,24 +804,43 @@ app.get('/api/produtos', async (req, res) => {
   sql += ordem === 'menor_preco'
     ? ' ORDER BY p.preco ASC, p.nome ASC, l.nome ASC'
     : ' ORDER BY p.destaque DESC, p.nome ASC';
-  const produtos = await dbAll(sql, params);
+  let produtos = await dbAll(sql, params);
+  if (coordenadaValida(latitude, longitude)) {
+    produtos = produtos.map(produto => ({
+      ...produto,
+      distancia_loja_km: Math.round(calcularDistanciaRetaKm(latitude, longitude, produto.loja_latitude, produto.loja_longitude) * 12) / 10
+    })).filter(produto => Number.isFinite(produto.distancia_loja_km) && produto.distancia_loja_km <= Number(produto.raio_entrega_km || 8));
+    if (ordem !== 'menor_preco') produtos.sort((a, b) => a.distancia_loja_km - b.distancia_loja_km);
+  }
   res.json({ produtos });
 });
 
 // ============ CLIENTES API ============
 app.post('/api/clientes/cadastro', async (req, res) => {
-  const { nome, email, senha, telefone, endereco_padrao, bairro, latitude, longitude } = req.body;
+  const { nome, email, senha, telefone, endereco_padrao, bairro, cep, cidade, estado, latitude, longitude } = req.body;
   try {
     if (!nome || !email || !senha) return res.status(400).json({ error: 'Nome, email e senha são obrigatórios' });
+    if (!emailValido(email)) return res.status(400).json({ error: 'Informe um email válido' });
+    if (!senhaValida(senha)) return res.status(400).json({ error: 'A senha precisa ter entre 8 e 128 caracteres' });
+    if (!cepValido(cep)) return res.status(400).json({ error: 'Informe um CEP válido' });
+    if (!textoSeguro(cidade, 120)) return res.status(400).json({ error: 'Informe a cidade' });
+    if (!ufValida(estado)) return res.status(400).json({ error: 'Informe a sigla do estado' });
+    if (!coordenadaValida(latitude, longitude)) return res.status(400).json({ error: 'Marque a localização do endereço pelo GPS' });
     if (!validarAceiteNoCadastro(req.body)) return res.status(400).json({ error: 'Leia e aceite os Termos e a Política de Privacidade' });
     const hash = bcrypt.hashSync(senha, 10);
     const result = await dbTransaction(async tx => {
-      const insercao = await tx.run('INSERT INTO clientes (nome, email, senha, telefone, endereco_padrao, bairro, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [nome, email, hash, telefone, endereco_padrao, bairro, latitude, longitude]);
+      const insercao = await tx.run(`INSERT INTO clientes
+        (nome, email, senha, telefone, endereco_padrao, bairro, cep, cidade, estado, latitude, longitude)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [textoSeguro(nome, 160), String(email).trim().toLowerCase(), hash, textoSeguro(telefone, 30),
+        textoSeguro(endereco_padrao, 300), textoSeguro(bairro, 120), cep ? apenasDigitos(cep) : null,
+        textoSeguro(cidade, 120) || null, estado ? String(estado).trim().toUpperCase() : null,
+        latitude || null, longitude || null]);
       await registrarAceiteTermos('cliente', insercao.lastID, req, tx);
       return insercao;
     });
     const token = jwt.sign({ id: result.lastID, tipo: 'cliente' }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ success: true, token, termos_pendentes: false, cliente: { id: result.lastID, nome, email, telefone, endereco_padrao, bairro, latitude: latitude || null, longitude: longitude || null } });
+    res.json({ success: true, token, termos_pendentes: false, cliente: { id: result.lastID, nome, email, telefone, endereco_padrao, bairro, cep, cidade, estado, latitude: latitude || null, longitude: longitude || null } });
   } catch (e) {
     if (isUniqueViolation(e)) return res.status(400).json({ error: 'Email já cadastrado' });
     console.error('Erro ao cadastrar cliente:', e);
@@ -530,28 +850,39 @@ app.post('/api/clientes/cadastro', async (req, res) => {
 
 app.post('/api/clientes/login', async (req, res) => {
   const { email, senha } = req.body;
-  const cliente = await dbGet('SELECT * FROM clientes WHERE email = ?', [email]);
+  if (!emailValido(email) || typeof senha !== 'string') return res.status(400).json({ error: 'Informe email e senha' });
+  const cliente = await dbGet('SELECT * FROM clientes WHERE email = ?', [String(email).trim().toLowerCase()]);
   if (!cliente) return res.status(401).json({ error: 'Email não encontrado' });
   if (!bcrypt.compareSync(senha, cliente.senha)) return res.status(401).json({ error: 'Senha incorreta' });
+  if (cliente.status_cadastro === STATUS_CADASTRO.SUSPENSO) return res.status(403).json({ error: 'Conta suspensa. Consulte o suporte.', motivo: cliente.status_motivo || null });
   const token = jwt.sign({ id: cliente.id, tipo: 'cliente' }, JWT_SECRET, { expiresIn: '7d' });
-  res.json({ success: true, token, termos_pendentes: !(await possuiAceiteAtual('cliente', cliente.id)), cliente: { id: cliente.id, nome: cliente.nome, email: cliente.email, telefone: cliente.telefone, endereco_padrao: cliente.endereco_padrao, bairro: cliente.bairro, latitude: cliente.latitude, longitude: cliente.longitude } });
+  res.json({ success: true, token, termos_pendentes: !(await possuiAceiteAtual('cliente', cliente.id)), cliente: { id: cliente.id, nome: cliente.nome, email: cliente.email, telefone: cliente.telefone, endereco_padrao: cliente.endereco_padrao, bairro: cliente.bairro, cep: cliente.cep, cidade: cliente.cidade, estado: cliente.estado, latitude: cliente.latitude, longitude: cliente.longitude } });
 });
 
 app.get('/api/clientes/:id', authCliente, async (req, res) => {
   if (req.usuario.id != req.params.id) return res.status(403).json({ error: 'Permissão negada' });
-  const cliente = await dbGet('SELECT id, nome, email, telefone, endereco_padrao, bairro, cidade, estado, latitude, longitude FROM clientes WHERE id = ?', [req.params.id]);
+  const cliente = await dbGet('SELECT id, nome, email, telefone, endereco_padrao, bairro, cep, cidade, estado, latitude, longitude FROM clientes WHERE id = ?', [req.params.id]);
   if (!cliente) return res.status(404).json({ error: 'Cliente não encontrado' });
   res.json({ cliente });
 });
 
 app.put('/api/clientes/:id', authCliente, async (req, res) => {
   if (req.usuario.id != req.params.id) return res.status(403).json({ error: 'Permissão negada' });
-  const { nome, telefone, endereco_padrao, bairro, latitude, longitude } = req.body;
+  const { nome, telefone, endereco_padrao, bairro, cep, cidade, estado, latitude, longitude } = req.body;
   const updates = []; const params = [];
   if (nome !== undefined) { updates.push('nome = ?'); params.push(nome); }
   if (telefone !== undefined) { updates.push('telefone = ?'); params.push(telefone); }
   if (endereco_padrao !== undefined) { updates.push('endereco_padrao = ?'); params.push(endereco_padrao); }
   if (bairro !== undefined) { updates.push('bairro = ?'); params.push(bairro); }
+  if (cep !== undefined) {
+    if (!cepValido(cep)) return res.status(400).json({ error: 'CEP inválido' });
+    updates.push('cep = ?'); params.push(apenasDigitos(cep));
+  }
+  if (cidade !== undefined) { updates.push('cidade = ?'); params.push(textoSeguro(cidade, 120)); }
+  if (estado !== undefined) {
+    if (!ufValida(estado)) return res.status(400).json({ error: 'Estado inválido' });
+    updates.push('estado = ?'); params.push(String(estado).trim().toUpperCase());
+  }
   if (latitude !== undefined) { updates.push('latitude = ?'); params.push(latitude); }
   if (longitude !== undefined) { updates.push('longitude = ?'); params.push(longitude); }
   if (updates.length === 0) return res.status(400).json({ error: 'Nada para atualizar' });
@@ -562,20 +893,32 @@ app.put('/api/clientes/:id', authCliente, async (req, res) => {
 
 // ============ ENTREGADORES API ============
 app.post('/api/entregadores/cadastro', async (req, res) => {
-  const { nome, cpf, email, senha, telefone, veiculo, placa, chave_pix } = req.body;
+  const { nome, cpf, email, senha, telefone, veiculo, placa, chave_pix, cep, cidade, estado } = req.body;
   try {
-    if (!nome || !email || !senha) return res.status(400).json({ error: 'Nome, email e senha são obrigatórios' });
+    if (!nome || !email || !senha || !cpf || !placa || !cidade || !estado) return res.status(400).json({ error: 'Preencha nome, CPF, email, senha, placa, cidade e estado' });
+    if (!emailValido(email)) return res.status(400).json({ error: 'Informe um email válido' });
+    if (!senhaValida(senha)) return res.status(400).json({ error: 'A senha precisa ter entre 8 e 128 caracteres' });
+    if (!documentoValido(cpf, 11)) return res.status(400).json({ error: 'Informe um CPF válido, com 11 números' });
+    if (cep && !cepValido(cep)) return res.status(400).json({ error: 'CEP inválido' });
+    if (!ufValida(estado)) return res.status(400).json({ error: 'Estado inválido' });
     if (!validarAceiteNoCadastro(req.body)) return res.status(400).json({ error: 'Leia e aceite os Termos e a Política de Privacidade' });
     if (req.body.declarou_requisitos_profissionais !== true) return res.status(400).json({ error: 'Confirme que atende aos requisitos legais e de segurança da atividade' });
     const hash = bcrypt.hashSync(senha, 10);
     const result = await dbTransaction(async tx => {
-      const insercao = await tx.run('INSERT INTO entregadores (nome, cpf, email, senha, telefone, veiculo, placa, chave_pix) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [nome, cpf, email, hash, telefone, veiculo, placa, chave_pix || null]);
+      const insercao = await tx.run(`INSERT INTO entregadores
+        (nome, cpf, email, senha, telefone, veiculo, placa, chave_pix, cep, cidade, estado, status_cadastro, disponivel)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendente', 0)`,
+      [textoSeguro(nome, 160), apenasDigitos(cpf), String(email).trim().toLowerCase(), hash,
+        textoSeguro(telefone, 30), textoSeguro(veiculo, 100), textoSeguro(placa, 10).toUpperCase(),
+        textoSeguro(chave_pix, 180) || null, cep ? apenasDigitos(cep) : null,
+        textoSeguro(cidade, 120), String(estado).trim().toUpperCase()]);
       await tx.run('INSERT INTO saldo_entregadores (entregador_id, saldo) VALUES (?, 0) ON CONFLICT (entregador_id) DO NOTHING', [insercao.lastID]);
       await registrarAceiteTermos('entregador', insercao.lastID, req, tx);
+      await criarNotificacao(tx, { tipoUsuario: 'admin', titulo: 'Novo entregador aguardando aprovação', mensagem: `${textoSeguro(nome, 160)} enviou um cadastro para análise.` });
       return insercao;
     });
     const token = jwt.sign({ id: result.lastID, tipo: 'entregador' }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ success: true, token, termos_pendentes: false, entregador: { id: result.lastID, nome, email, comissao_percentual: 5, inicio_promocao: null } });
+    res.json({ success: true, token, termos_pendentes: false, status_cadastro: 'pendente', message: 'Cadastro enviado para aprovação.', entregador: { id: result.lastID, nome, email, comissao_percentual: 5, inicio_promocao: null, disponivel: 0, cidade, estado, status_cadastro: 'pendente' } });
   } catch (e) {
     if (isUniqueViolation(e)) return res.status(400).json({ error: 'CPF ou email já cadastrado' });
     console.error('Erro ao cadastrar entregador:', e);
@@ -585,17 +928,19 @@ app.post('/api/entregadores/cadastro', async (req, res) => {
 
 app.post('/api/entregadores/login', async (req, res) => {
   const { email, senha } = req.body;
-  const entregador = await dbGet('SELECT * FROM entregadores WHERE email = ?', [email]);
+  if (!emailValido(email) || typeof senha !== 'string') return res.status(400).json({ error: 'Informe email e senha' });
+  const entregador = await dbGet('SELECT * FROM entregadores WHERE email = ?', [String(email).trim().toLowerCase()]);
   if (!entregador) return res.status(401).json({ error: 'Email não encontrado' });
   if (!bcrypt.compareSync(senha, entregador.senha)) return res.status(401).json({ error: 'Senha incorreta' });
+  if (entregador.status_cadastro === STATUS_CADASTRO.SUSPENSO) return res.status(403).json({ error: 'Conta suspensa. Consulte o suporte.', motivo: entregador.status_motivo || null });
   const token = jwt.sign({ id: entregador.id, tipo: 'entregador' }, JWT_SECRET, { expiresIn: '7d' });
   const comissaoPercentual = calcularPercentualPromocional(entregador.inicio_promocao);
   await dbRun('UPDATE entregadores SET comissao_percentual = ? WHERE id = ?', [comissaoPercentual, entregador.id]);
-  res.json({ success: true, token, termos_pendentes: !(await possuiAceiteAtual('entregador', entregador.id)), entregador: { id: entregador.id, nome: entregador.nome, email: entregador.email, veiculo: entregador.veiculo, disponivel: entregador.disponivel, chave_pix: entregador.chave_pix, comissao_percentual: comissaoPercentual, inicio_promocao: entregador.inicio_promocao } });
+  res.json({ success: true, token, termos_pendentes: !(await possuiAceiteAtual('entregador', entregador.id)), status_cadastro: entregador.status_cadastro, entregador: { id: entregador.id, nome: entregador.nome, email: entregador.email, veiculo: entregador.veiculo, disponivel: entregador.disponivel, chave_pix: entregador.chave_pix, comissao_percentual: comissaoPercentual, inicio_promocao: entregador.inicio_promocao, cep: entregador.cep, cidade: entregador.cidade, estado: entregador.estado, status_cadastro: entregador.status_cadastro, status_motivo: entregador.status_motivo } });
 });
 
-app.get('/api/entregadores/disponiveis', async (req, res) => {
-  const entregadores = await dbAll('SELECT id, nome, veiculo, total_entregas, latitude, longitude FROM entregadores WHERE disponivel = 1');
+app.get('/api/entregadores/disponiveis', authAdmin, async (req, res) => {
+  const entregadores = await dbAll("SELECT id, nome, veiculo, total_entregas, cidade, estado FROM entregadores WHERE disponivel = 1 AND status_cadastro = 'aprovado'");
   res.json({ entregadores });
 });
 
@@ -605,7 +950,13 @@ app.put('/api/entregadores/:id/localizacao', authEntregador, async (req, res) =>
   const updates = []; const params = [];
   if (latitude !== undefined) { updates.push('latitude = ?'); params.push(latitude); }
   if (longitude !== undefined) { updates.push('longitude = ?'); params.push(longitude); }
-  if (disponivel !== undefined) { updates.push('disponivel = ?'); params.push(disponivel ? 1 : 0); }
+  if (disponivel !== undefined) {
+    const cadastro = await dbGet('SELECT status_cadastro FROM entregadores WHERE id = ?', [req.params.id]);
+    if (disponivel && cadastro?.status_cadastro !== STATUS_CADASTRO.APROVADO) {
+      return res.status(403).json({ error: 'Aguarde a aprovação do cadastro para ficar disponível' });
+    }
+    updates.push('disponivel = ?'); params.push(disponivel ? 1 : 0);
+  }
   if (updates.length === 0) return res.status(400).json({ error: 'Nada para atualizar' });
   params.push(req.params.id);
   await dbRun(`UPDATE entregadores SET ${updates.join(', ')} WHERE id = ?`, params);
@@ -640,6 +991,36 @@ app.get('/api/lojas/:id/financeiro', authLojas, async (req, res) => {
     valor_liquido::double precision AS valor_liquido, tipo, data
     FROM movimentacoes_lojas WHERE loja_id = ? ORDER BY data DESC LIMIT 50`, [req.params.id]);
   res.json({ saldo, movimentacoes });
+});
+
+// Solicitações de saque ficam preparadas para o futuro provedor real. No modo
+// atual nenhum dinheiro é transferido; o administrador apenas testa o fluxo.
+app.get('/api/saques', authQualquer, async (req, res) => {
+  if (!['loja', 'entregador'].includes(req.usuario.tipo)) return res.status(403).json({ error: 'Saques disponíveis somente para lojas e entregadores' });
+  const saques = await dbAll('SELECT * FROM saques WHERE tipo_usuario = ? AND usuario_id = ? ORDER BY criado_em DESC LIMIT 50', [req.usuario.tipo, req.usuario.id]);
+  res.json({ saques, ambiente_teste: PAYMENT_MODE === 'mock' });
+});
+
+app.post('/api/saques', authQualquer, async (req, res) => {
+  if (!['loja', 'entregador'].includes(req.usuario.tipo)) return res.status(403).json({ error: 'Saques disponíveis somente para lojas e entregadores' });
+  const tabelaConta = req.usuario.tipo === 'loja' ? 'lojas' : 'entregadores';
+  const tabelaSaldo = req.usuario.tipo === 'loja' ? 'saldo_lojas' : 'saldo_entregadores';
+  const campoId = req.usuario.tipo === 'loja' ? 'loja_id' : 'entregador_id';
+  const conta = await dbGet(`SELECT status_cadastro, chave_pix FROM ${tabelaConta} WHERE id = ?`, [req.usuario.id]);
+  if (conta?.status_cadastro !== STATUS_CADASTRO.APROVADO) return res.status(403).json({ error: 'Cadastro não aprovado para solicitar saque' });
+  if (!conta.chave_pix) return res.status(400).json({ error: 'Cadastre uma chave Pix antes de solicitar saque' });
+  const valor = Number(req.body.valor);
+  if (!Number.isFinite(valor) || valor < 10) return res.status(400).json({ error: 'O saque mínimo de teste é R$ 10,00' });
+  const saldo = await dbGet(`SELECT saldo FROM ${tabelaSaldo} WHERE ${campoId} = ?`, [req.usuario.id]);
+  const pendente = await dbGet(`SELECT COALESCE(SUM(valor), 0) AS total FROM saques
+    WHERE tipo_usuario = ? AND usuario_id = ? AND status IN ('pendente', 'aprovado')`, [req.usuario.tipo, req.usuario.id]);
+  const disponivel = Number(saldo?.saldo || 0) - Number(pendente?.total || 0);
+  if (valor > disponivel) return res.status(409).json({ error: `Saldo disponível para saque: R$ ${disponivel.toFixed(2)}` });
+  const resultado = await dbRun(`INSERT INTO saques (tipo_usuario, usuario_id, valor, chave_pix)
+    VALUES (?, ?, ?, ?)`, [req.usuario.tipo, req.usuario.id, valor, conta.chave_pix]);
+  await dbRun(`INSERT INTO notificacoes (tipo_usuario, usuario_id, titulo, mensagem)
+    VALUES ('admin', NULL, 'Nova solicitação de saque', ?)`, [`${req.usuario.tipo} solicitou saque de R$ ${valor.toFixed(2)}.`]);
+  res.json({ success: true, id: resultado.lastID, message: 'Solicitação de saque registrada em modo de teste.' });
 });
 
 // ============ PEDIDOS API (NOVO FLUXO COMPLETO) ============
@@ -724,7 +1105,8 @@ app.get('/api/configuracoes-compra', async (req, res) => {
 app.post('/api/frete/cotacao', authCliente, async (req, res) => {
   try {
     const { loja_id, latitude, longitude } = req.body;
-    const loja = await dbGet('SELECT id, latitude, longitude FROM lojas WHERE id = ? AND aberto = 1', [loja_id]);
+    const loja = await dbGet(`SELECT id, latitude, longitude, raio_entrega_km, fuso_horario, cidade, estado
+      FROM lojas WHERE id = ? AND aberto = 1 AND status_cadastro = 'aprovado'`, [loja_id]);
     if (!loja) return res.status(404).json({ error: 'Loja não encontrada ou fechada' });
     const cotacao = await calcularCotacaoFrete(loja, latitude, longitude);
     res.json({ success: true, ...cotacao });
@@ -741,7 +1123,9 @@ app.post('/api/pedidos', authCliente, async (req, res) => {
     const { loja_id, itens, tipo_entrega, endereco_entrega, bairro_entrega, latitude_entrega, longitude_entrega, forma_pagamento, observacao } = req.body;
     if (!['entrega', 'retirada'].includes(tipo_entrega)) return res.status(400).json({ error: 'Tipo de entrega inválido' });
     if (tipo_entrega === 'entrega' && !endereco_entrega) return res.status(400).json({ error: 'Informe o endereço de entrega' });
-    const loja = await dbGet('SELECT id, plano, comissao_percentual, inicio_promocao, latitude, longitude FROM lojas WHERE id = ? AND aberto = 1', [loja_id]);
+    const loja = await dbGet(`SELECT id, plano, comissao_percentual, inicio_promocao, latitude,
+      longitude, raio_entrega_km, fuso_horario, cidade, estado FROM lojas
+      WHERE id = ? AND aberto = 1 AND status_cadastro = 'aprovado'`, [loja_id]);
     if (!loja) return res.status(404).json({ error: 'Loja não encontrada ou fechada' });
     const carrinho = await montarItensPedido(loja_id, itens);
     const configuracao = await obterConfiguracaoFrete();
@@ -828,14 +1212,14 @@ app.put('/api/pedidos/:id/confirmar', authCliente, async (req, res) => {
         if (!['aguardando_confirmacao', 'aguardando_pagamento'].includes(pedido.status)) {
           throw Object.assign(new Error('Pedido já foi processado'), { status: 400 });
         }
-        await tx.run("UPDATE pedidos SET status = 'cancelado' WHERE id = ?", [pedido.id]);
-        await tx.run("UPDATE pagamentos SET status = 'cancelado', atualizado_em = CURRENT_TIMESTAMP WHERE pedido_id = ? AND status = 'aguardando'", [pedido.id]);
+        await cancelarPedidoComSeguranca(tx, pedido, 'cliente', 'Cliente não confirmou o pedido');
         return { cancelado: true };
       }
 
       if (!['aguardando_confirmacao', 'aguardando_pagamento'].includes(pedido.status)) {
         throw Object.assign(new Error('Pedido já foi processado'), { status: 400 });
       }
+      await reservarEstoque(tx, pedido);
       const pagamento = await obterOuCriarPagamentoTeste(tx, pedido);
       await tx.run("UPDATE pedidos SET cliente_confirmou = 1, status = 'aguardando_pagamento' WHERE id = ?", [pedido.id]);
       return { cancelado: false, pagamento };
@@ -864,7 +1248,11 @@ app.get('/api/pagamentos/pedido/:pedido_id', authCliente, async (req, res) => {
   if (pagamentoExpirado(pagamento)) {
     await dbTransaction(async tx => {
       await tx.run("UPDATE pagamentos SET status = 'expirado', atualizado_em = CURRENT_TIMESTAMP WHERE id = ? AND status = 'aguardando'", [pagamento.id]);
-      await tx.run("UPDATE pedidos SET status = 'cancelado' WHERE id = ? AND status = 'aguardando_pagamento'", [pagamento.pedido_id]);
+      const pedido = await tx.get('SELECT * FROM pedidos WHERE id = ? FOR UPDATE', [pagamento.pedido_id]);
+      if (pedido?.status === 'aguardando_pagamento') {
+        await liberarReservaEstoque(tx, pedido.id);
+        await tx.run("UPDATE pedidos SET status = 'cancelado', cancelado_por = 'sistema', motivo_cancelamento = 'Pix expirado' WHERE id = ?", [pagamento.pedido_id]);
+      }
     });
     pagamento = await dbGet('SELECT * FROM pagamentos WHERE id = ?', [pagamento.id]);
   }
@@ -887,6 +1275,9 @@ app.post('/api/admin/pagamentos/:pedido_id/simular', authAdmin, async (req, res)
         atualizado_em = CURRENT_TIMESTAMP WHERE id = ?`, [pagamento.id]);
       await tx.run(`UPDATE pedidos SET pix_pago = 1, status = 'aguardando',
         data_confirmacao = CURRENT_TIMESTAMP WHERE id = ?`, [pedido.id]);
+      await confirmarReservaEstoque(tx, pedido.id);
+      await criarNotificacao(tx, { tipoUsuario: 'loja', usuarioId: pedido.loja_id, titulo: 'Novo pedido pago', mensagem: `O pedido #${pedido.id} está aguardando sua confirmação.`, pedidoId: pedido.id });
+      await criarNotificacao(tx, { tipoUsuario: 'cliente', usuarioId: pedido.cliente_id, titulo: 'Pagamento confirmado', mensagem: `O pedido #${pedido.id} foi enviado para a loja.`, pedidoId: pedido.id });
       return tx.get('SELECT * FROM pagamentos WHERE id = ?', [pagamento.id]);
     });
     res.json({
@@ -901,8 +1292,88 @@ app.post('/api/admin/pagamentos/:pedido_id/simular', authAdmin, async (req, res)
   }
 });
 
+// Cancelamento seguro. Reembolso real será executado pelo provedor no futuro;
+// enquanto isso, o pedido pago entra na fila administrativa de teste.
+app.post('/api/pedidos/:id/cancelar', authQualquer, async (req, res) => {
+  try {
+    const motivo = textoSeguro(req.body.motivo, 500);
+    if (motivo.length < 5) return res.status(400).json({ error: 'Explique brevemente o motivo do cancelamento' });
+    await dbTransaction(async tx => {
+      const pedido = await tx.get('SELECT * FROM pedidos WHERE id = ? FOR UPDATE', [req.params.id]);
+      if (!pedido) throw Object.assign(new Error('Pedido não encontrado'), { status: 404 });
+      const autorizado = req.usuario.tipo === 'admin'
+        || (req.usuario.tipo === 'cliente' && Number(pedido.cliente_id) === Number(req.usuario.id))
+        || (req.usuario.tipo === 'loja' && Number(pedido.loja_id) === Number(req.usuario.id));
+      if (!autorizado) throw Object.assign(new Error('Você não pode cancelar este pedido'), { status: 403 });
+      await cancelarPedidoComSeguranca(tx, pedido, req.usuario.tipo, motivo);
+    });
+    if (req.usuario.tipo === 'admin') await registrarAuditoria(req, 'cancelar_pedido', 'pedido', req.params.id, motivo);
+    res.json({ success: true, message: 'Cancelamento registrado com segurança.' });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || 'Não foi possível cancelar o pedido' });
+  }
+});
+
+app.get('/api/admin/reembolsos', authAdmin, async (req, res) => {
+  const reembolsos = await dbAll(`SELECT r.*, p.total_final, p.status AS pedido_status,
+    c.nome AS cliente_nome, l.nome AS loja_nome
+    FROM reembolsos r JOIN pedidos p ON p.id = r.pedido_id
+    JOIN clientes c ON c.id = p.cliente_id JOIN lojas l ON l.id = p.loja_id
+    ORDER BY r.criado_em DESC LIMIT 100`);
+  res.json({ reembolsos, ambiente_teste: PAYMENT_MODE === 'mock' });
+});
+
+app.put('/api/admin/reembolsos/:id', authAdmin, async (req, res) => {
+  const status = textoSeguro(req.body.status, 30);
+  if (!['aprovado', 'recusado', 'processado'].includes(status)) return res.status(400).json({ error: 'Status de reembolso inválido' });
+  const reembolso = await dbGet('SELECT * FROM reembolsos WHERE id = ?', [req.params.id]);
+  if (!reembolso) return res.status(404).json({ error: 'Reembolso não encontrado' });
+  if (status === 'processado' && PAYMENT_MODE !== 'mock') {
+    return res.status(409).json({ error: 'No modo real, o processamento será confirmado somente pelo provedor de pagamento' });
+  }
+  await dbTransaction(async tx => {
+    await tx.run('UPDATE reembolsos SET status = ?, observacao_admin = ?, atualizado_em = CURRENT_TIMESTAMP WHERE id = ?', [status, textoSeguro(req.body.observacao, 500), reembolso.id]);
+    await tx.run('UPDATE pedidos SET reembolso_status = ? WHERE id = ?', [status, reembolso.pedido_id]);
+    const pedido = await tx.get('SELECT cliente_id FROM pedidos WHERE id = ?', [reembolso.pedido_id]);
+    await criarNotificacao(tx, { tipoUsuario: 'cliente', usuarioId: pedido.cliente_id, titulo: 'Atualização do reembolso', mensagem: `O reembolso do pedido #${reembolso.pedido_id} está com status: ${status}.`, pedidoId: reembolso.pedido_id });
+  });
+  await registrarAuditoria(req, 'atualizar_reembolso', 'reembolso', reembolso.id, `${status}: ${textoSeguro(req.body.observacao, 500)}`);
+  res.json({ success: true });
+});
+
+app.get('/api/admin/saques', authAdmin, async (req, res) => {
+  const saques = await dbAll(`SELECT s.*,
+    CASE WHEN s.tipo_usuario = 'loja' THEN l.nome ELSE e.nome END AS nome
+    FROM saques s LEFT JOIN lojas l ON s.tipo_usuario = 'loja' AND l.id = s.usuario_id
+    LEFT JOIN entregadores e ON s.tipo_usuario = 'entregador' AND e.id = s.usuario_id
+    ORDER BY s.criado_em DESC LIMIT 100`);
+  res.json({ saques, ambiente_teste: PAYMENT_MODE === 'mock' });
+});
+
+app.put('/api/admin/saques/:id', authAdmin, async (req, res) => {
+  const status = textoSeguro(req.body.status, 30);
+  if (!['aprovado', 'recusado', 'processado'].includes(status)) return res.status(400).json({ error: 'Status de saque inválido' });
+  const saque = await dbGet('SELECT * FROM saques WHERE id = ?', [req.params.id]);
+  if (!saque) return res.status(404).json({ error: 'Saque não encontrado' });
+  if (saque.status === 'processado') return res.status(409).json({ error: 'Este saque já foi processado' });
+  if (status === 'processado' && PAYMENT_MODE !== 'mock') return res.status(409).json({ error: 'O provedor real deverá confirmar a transferência' });
+  await dbTransaction(async tx => {
+    if (status === 'processado') {
+      const tabelaSaldo = saque.tipo_usuario === 'loja' ? 'saldo_lojas' : 'saldo_entregadores';
+      const campoId = saque.tipo_usuario === 'loja' ? 'loja_id' : 'entregador_id';
+      const saldo = await tx.get(`SELECT saldo FROM ${tabelaSaldo} WHERE ${campoId} = ? FOR UPDATE`, [saque.usuario_id]);
+      if (Number(saldo?.saldo || 0) < Number(saque.valor)) throw Object.assign(new Error('Saldo insuficiente para concluir o saque'), { status: 409 });
+      await tx.run(`UPDATE ${tabelaSaldo} SET saldo = saldo - ?, total_sacado = total_sacado + ? WHERE ${campoId} = ?`, [saque.valor, saque.valor, saque.usuario_id]);
+    }
+    await tx.run('UPDATE saques SET status = ?, observacao_admin = ?, atualizado_em = CURRENT_TIMESTAMP WHERE id = ?', [status, textoSeguro(req.body.observacao, 500), saque.id]);
+    await criarNotificacao(tx, { tipoUsuario: saque.tipo_usuario, usuarioId: saque.usuario_id, titulo: 'Atualização do saque', mensagem: `Sua solicitação de R$ ${Number(saque.valor).toFixed(2)} está com status: ${status}.` });
+  });
+  await registrarAuditoria(req, 'atualizar_saque', 'saque', saque.id, `${status}: ${textoSeguro(req.body.observacao, 500)}`);
+  res.json({ success: true });
+});
+
 // Lojas veem pedidos
-app.get('/api/pedidos/loja/:loja_id', authLojas, async (req, res) => {
+app.get('/api/pedidos/loja/:loja_id', authLojas, exigirCadastroAprovado, async (req, res) => {
   if (req.usuario.id != req.params.loja_id) return res.status(403).json({ error: 'Permissão negada' });
   const { status } = req.query;
   let sql = `SELECT p.*, c.nome as cliente_nome, c.telefone as cliente_telefone, c.endereco_padrao, c.bairro
@@ -916,7 +1387,7 @@ app.get('/api/pedidos/loja/:loja_id', authLojas, async (req, res) => {
 });
 
 // LOJA: Separar pedido (coloca quem separou e finaliza)
-app.put('/api/pedidos/:id/separar', authLojas, async (req, res) => {
+app.put('/api/pedidos/:id/separar', authLojas, exigirCadastroAprovado, async (req, res) => {
   const pedido = await dbGet('SELECT * FROM pedidos WHERE id = ?', [req.params.id]);
   if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado' });
   if (pedido.loja_id != req.usuario.id) return res.status(403).json({ error: 'Esse pedido não é da sua loja' });
@@ -926,11 +1397,16 @@ app.put('/api/pedidos/:id/separar', authLojas, async (req, res) => {
   if (!separado_por) return res.status(400).json({ error: 'Informe quem separou o pedido' });
   
   await dbRun("UPDATE pedidos SET status = 'separado', separado_por = ?, data_separado = CURRENT_TIMESTAMP WHERE id = ?", [separado_por, req.params.id]);
+  if (pedido.tipo_entrega === 'entrega' && normalizarPlanoLoja(pedido.plano_loja) === 'entrega_obraexpress') {
+    await dbRun(`INSERT INTO notificacoes (tipo_usuario, usuario_id, titulo, mensagem, pedido_id)
+      SELECT 'entregador', id, 'Nova entrega disponível', ?, ? FROM entregadores
+      WHERE status_cadastro = 'aprovado' AND disponivel = 1`, [`Coleta do pedido #${pedido.id} disponível em ${pedido.distancia_km || 0} km.`, pedido.id]);
+  }
   res.json({ success: true, message: 'Pedido separado e disponível para entrega!' });
 });
 
 // A loja inicia a entrega quando escolheu usar entregador próprio.
-app.put('/api/pedidos/:id/iniciar-entrega-loja', authLojas, async (req, res) => {
+app.put('/api/pedidos/:id/iniciar-entrega-loja', authLojas, exigirCadastroAprovado, async (req, res) => {
   const pedido = await dbGet('SELECT * FROM pedidos WHERE id = ?', [req.params.id]);
   if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado' });
   if (pedido.loja_id != req.usuario.id) return res.status(403).json({ error: 'Esse pedido não é da sua loja' });
@@ -956,8 +1432,40 @@ app.get('/api/pedidos/cliente/:cliente_id', authCliente, async (req, res) => {
   res.json({ pedidos });
 });
 
+// Rastreamento protegido: a localização do entregador só é mostrada ao cliente
+// dono do pedido e apenas durante a coleta/entrega ativa.
+app.get('/api/pedidos/:id/rastreamento', authCliente, async (req, res) => {
+  const pedido = await dbGet(`SELECT p.id, p.cliente_id, p.status, p.distancia_km,
+    p.latitude_entrega, p.longitude_entrega, l.latitude AS loja_latitude,
+    l.longitude AS loja_longitude, e.id AS entregador_id, e.nome AS entregador_nome,
+    e.veiculo AS entregador_veiculo, e.latitude AS entregador_latitude,
+    e.longitude AS entregador_longitude
+    FROM pedidos p JOIN lojas l ON l.id = p.loja_id
+    LEFT JOIN entregadores e ON e.id = p.entregador_id WHERE p.id = ?`, [req.params.id]);
+  if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado' });
+  if (Number(pedido.cliente_id) !== Number(req.usuario.id)) return res.status(403).json({ error: 'Esse pedido não é seu' });
+  const ativo = ['em_coleta', 'saiu_entrega'].includes(pedido.status) && pedido.entregador_id;
+  if (!ativo || !coordenadaValida(pedido.entregador_latitude, pedido.entregador_longitude)) {
+    return res.json({ ativo: false, status: pedido.status, mensagem: 'O rastreamento ficará disponível quando a entrega estiver em andamento.' });
+  }
+  const destinoLat = pedido.status === 'em_coleta' ? pedido.loja_latitude : pedido.latitude_entrega;
+  const destinoLng = pedido.status === 'em_coleta' ? pedido.loja_longitude : pedido.longitude_entrega;
+  const distancia = coordenadaValida(destinoLat, destinoLng)
+    ? calcularDistanciaRetaKm(pedido.entregador_latitude, pedido.entregador_longitude, destinoLat, destinoLng) * 1.2
+    : null;
+  res.json({
+    ativo: true,
+    status: pedido.status,
+    entregador: { nome: pedido.entregador_nome, veiculo: pedido.entregador_veiculo },
+    localizacao: { latitude: Number(pedido.entregador_latitude), longitude: Number(pedido.entregador_longitude) },
+    destino: coordenadaValida(destinoLat, destinoLng) ? { latitude: Number(destinoLat), longitude: Number(destinoLng) } : null,
+    distancia_restante_km: distancia === null ? null : Math.round(distancia * 10) / 10,
+    estimativa_minutos: distancia === null ? null : Math.max(2, Math.round(distancia / 25 * 60))
+  });
+});
+
 // Entregador vê os pedidos dele
-app.get('/api/pedidos/entregador/:entregador_id', authEntregador, async (req, res) => {
+app.get('/api/pedidos/entregador/:entregador_id', authEntregador, exigirCadastroAprovado, async (req, res) => {
   if (req.usuario.id != req.params.entregador_id) return res.status(403).json({ error: 'Permissão negada' });
   const pedidos = await dbAll(`SELECT p.*, l.nome as loja_nome, l.endereco as loja_endereco, 
     l.latitude as loja_latitude, l.longitude as loja_longitude, l.telefone as loja_telefone,
@@ -972,14 +1480,14 @@ app.get('/api/pedidos/entregador/:entregador_id', authEntregador, async (req, re
 });
 
 // ENTREGADOR: Ver pedidos disponíveis (status = separado, precisa de entrega)
-app.get('/api/pedidos/disponiveis', authEntregador, async (req, res) => {
-  const entregador = await dbGet('SELECT latitude, longitude FROM entregadores WHERE id = ?', [req.usuario.id]);
+app.get('/api/pedidos/disponiveis', authEntregador, exigirCadastroAprovado, async (req, res) => {
+  const entregador = await dbGet("SELECT latitude, longitude, cidade, estado FROM entregadores WHERE id = ? AND status_cadastro = 'aprovado'", [req.usuario.id]);
   if (!coordenadaValida(entregador?.latitude, entregador?.longitude)) {
     return res.json({ pedidos: [], gps_pendente: true, mensagem: 'Aguardando uma localização GPS válida' });
   }
   const configuracao = await obterConfiguracaoFrete();
   const pedidos = await dbAll(`SELECT p.*, l.nome as loja_nome, l.endereco as loja_endereco, 
-    l.latitude as loja_latitude, l.longitude as loja_longitude, l.telefone as loja_telefone, l.chave_pix,
+    l.latitude as loja_latitude, l.longitude as loja_longitude, l.telefone as loja_telefone,
     c.nome as cliente_nome, c.telefone as cliente_telefone, COALESCE(p.endereco_entrega, c.endereco_padrao) as cliente_endereco,
     COALESCE(p.latitude_entrega, c.latitude) as cliente_latitude,
     COALESCE(p.longitude_entrega, c.longitude) as cliente_longitude
@@ -1005,7 +1513,7 @@ app.get('/api/pedidos/disponiveis', authEntregador, async (req, res) => {
 });
 
 // ENTREGADOR: Aceitar pedido
-app.put('/api/pedidos/:id/aceitar', authEntregador, async (req, res) => {
+app.put('/api/pedidos/:id/aceitar', authEntregador, exigirCadastroAprovado, async (req, res) => {
   try {
     const configuracao = await obterConfiguracaoFrete();
     const resultado = await dbTransaction(async tx => {
@@ -1025,6 +1533,8 @@ app.put('/api/pedidos/:id/aceitar', authEntregador, async (req, res) => {
       [req.usuario.id, oferta.valorLiquido, oferta.margemPlataformaEntrega,
         oferta.distanciaColetaKm, oferta.distanciaTotalKm, pedido.id]);
       await tx.run('UPDATE entregadores SET disponivel = 0 WHERE id = ?', [req.usuario.id]);
+      await criarNotificacao(tx, { tipoUsuario: 'cliente', usuarioId: pedido.cliente_id, titulo: 'Entregador a caminho da loja', mensagem: `O entregador aceitou o pedido #${pedido.id}.`, pedidoId: pedido.id });
+      await criarNotificacao(tx, { tipoUsuario: 'loja', usuarioId: pedido.loja_id, titulo: 'Entregador a caminho', mensagem: `A coleta do pedido #${pedido.id} foi aceita.`, pedidoId: pedido.id });
       return oferta;
     });
     res.json({
@@ -1042,7 +1552,7 @@ app.put('/api/pedidos/:id/aceitar', authEntregador, async (req, res) => {
 });
 
 // ENTREGADOR: Recusar pedido (volta pra lista)
-app.put('/api/pedidos/:id/recusar', authEntregador, async (req, res) => {
+app.put('/api/pedidos/:id/recusar', authEntregador, exigirCadastroAprovado, async (req, res) => {
   const pedido = await dbGet('SELECT * FROM pedidos WHERE id = ?', [req.params.id]);
   if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado' });
   if (pedido.entregador_id != req.usuario.id) return res.status(403).json({ error: 'Você não pode recusar um pedido que não é seu' });
@@ -1057,7 +1567,7 @@ app.put('/api/pedidos/:id/recusar', authEntregador, async (req, res) => {
 });
 
 // ENTREGADOR: Foto da coleta (depois de conferir na loja)
-app.put('/api/pedidos/:id/foto-coleta', authEntregador, async (req, res) => {
+app.put('/api/pedidos/:id/foto-coleta', authEntregador, exigirCadastroAprovado, async (req, res) => {
   const pedido = await dbGet('SELECT * FROM pedidos WHERE id = ?', [req.params.id]);
   if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado' });
   if (pedido.entregador_id != req.usuario.id) return res.status(403).json({ error: 'Permissão negada' });
@@ -1065,8 +1575,11 @@ app.put('/api/pedidos/:id/foto-coleta', authEntregador, async (req, res) => {
   
   const { foto } = req.body;
   if (!foto) return res.status(400).json({ error: 'Envie a foto da coleta' });
+  if (!imagemValida(foto)) return res.status(400).json({ error: 'Foto inválida ou maior que 2 MB' });
   
   await dbRun("UPDATE pedidos SET foto_coleta = ?, data_coleta = CURRENT_TIMESTAMP, status = 'saiu_entrega' WHERE id = ?", [foto, req.params.id]);
+  await dbRun(`INSERT INTO notificacoes (tipo_usuario, usuario_id, titulo, mensagem, pedido_id)
+    VALUES ('cliente', ?, 'Pedido saiu para entrega', ?, ?)`, [pedido.cliente_id, `O pedido #${pedido.id} está a caminho.`, pedido.id]);
   res.json({ success: true, message: 'Foto da coleta registrada! Vá entregar.' });
 });
 
@@ -1119,9 +1632,10 @@ async function registrarRepasseFinanceiro(tx, pedido, entregadorId = null) {
 }
 
 // ENTREGADOR: Finalizar entrega (foto + crédito automático)
-app.put('/api/pedidos/:id/finalizar', authEntregador, async (req, res) => {
+app.put('/api/pedidos/:id/finalizar', authEntregador, exigirCadastroAprovado, async (req, res) => {
   const { foto } = req.body;
   if (!foto) return res.status(400).json({ error: 'Tire a foto da entrega para finalizar' });
+  if (!imagemValida(foto)) return res.status(400).json({ error: 'Foto inválida ou maior que 2 MB' });
   try {
     const resultado = await dbTransaction(async tx => {
       const pedido = await tx.get('SELECT * FROM pedidos WHERE id = ? FOR UPDATE', [req.params.id]);
@@ -1129,7 +1643,10 @@ app.put('/api/pedidos/:id/finalizar', authEntregador, async (req, res) => {
       if (pedido.entregador_id != req.usuario.id) throw Object.assign(new Error('Permissão negada'), { status: 403 });
       if (pedido.status !== 'saiu_entrega') throw Object.assign(new Error('Pedido não está em entrega'), { status: 400 });
       await tx.run("UPDATE pedidos SET foto_entrega = ?, status = 'entregue', data_entrega = CURRENT_TIMESTAMP WHERE id = ?", [foto, pedido.id]);
+      await consumirReservaEstoque(tx, pedido.id);
       await registrarRepasseFinanceiro(tx, pedido, req.usuario.id);
+      await criarNotificacao(tx, { tipoUsuario: 'cliente', usuarioId: pedido.cliente_id, titulo: 'Pedido entregue', mensagem: `A entrega do pedido #${pedido.id} foi concluída.`, pedidoId: pedido.id });
+      await criarNotificacao(tx, { tipoUsuario: 'loja', usuarioId: pedido.loja_id, titulo: 'Pedido entregue', mensagem: `O pedido #${pedido.id} foi concluído.`, pedidoId: pedido.id });
       return { creditado: Number(pedido.valor_motoboy || 0), valorPlataforma: Number(pedido.valor_plataforma || 0) + Number(pedido.valor_comissao_loja || 0) + Number(pedido.taxa_pedido_pequeno || 0) };
     });
     res.json({ success: true, message: '✅ Entrega finalizada!', creditado: resultado.creditado, valor_plataforma: resultado.valorPlataforma });
@@ -1141,7 +1658,7 @@ app.put('/api/pedidos/:id/finalizar', authEntregador, async (req, res) => {
 });
 
 // Loja conclui retirada ou entrega feita por sua própria equipe.
-app.put('/api/pedidos/:id/finalizar-loja', authLojas, async (req, res) => {
+app.put('/api/pedidos/:id/finalizar-loja', authLojas, exigirCadastroAprovado, async (req, res) => {
   try {
     const resultado = await dbTransaction(async tx => {
       const pedido = await tx.get('SELECT * FROM pedidos WHERE id = ? FOR UPDATE', [req.params.id]);
@@ -1154,7 +1671,9 @@ app.put('/api/pedidos/:id/finalizar-loja', authLojas, async (req, res) => {
         throw Object.assign(new Error('Código de retirada incorreto'), { status: 400 });
       }
       await tx.run("UPDATE pedidos SET status = 'entregue', data_entrega = CURRENT_TIMESTAMP WHERE id = ?", [pedido.id]);
+      await consumirReservaEstoque(tx, pedido.id);
       await registrarRepasseFinanceiro(tx, pedido, null);
+      await criarNotificacao(tx, { tipoUsuario: 'cliente', usuarioId: pedido.cliente_id, titulo: 'Pedido concluído', mensagem: `O pedido #${pedido.id} foi concluído.`, pedidoId: pedido.id });
       return { valorLoja: Number(pedido.valor_liquido_loja || 0) };
     });
     res.json({ success: true, message: 'Pedido concluído e repasse calculado', valor_loja: resultado.valorLoja });
@@ -1177,8 +1696,18 @@ app.put('/api/pedidos/:id/status', async (req, res) => {
     if (!['admin', 'loja'].includes(usuario.tipo)) {
       return res.status(403).json({ error: 'Permissão negada' });
     }
+    if (!status || !['confirmado', 'cancelado'].includes(status)) {
+      return res.status(400).json({ error: 'Mudança de status inválida para esta rota' });
+    }
+    if (usuario.tipo === 'admin' && status !== 'cancelado') {
+      return res.status(403).json({ error: 'O administrador não pode pular as etapas operacionais do pedido' });
+    }
     if (usuario.tipo === 'loja' && pedido.loja_id != usuario.id) {
       return res.status(403).json({ error: 'Esse pedido não pertence à sua loja' });
+    }
+    if (usuario.tipo === 'loja') {
+      const loja = await dbGet('SELECT status_cadastro FROM lojas WHERE id = ?', [usuario.id]);
+      if (loja?.status_cadastro !== STATUS_CADASTRO.APROVADO) return res.status(403).json({ error: 'Cadastro da loja ainda não está aprovado' });
     }
     if (usuario.tipo === 'loja' && !['confirmado', 'cancelado'].includes(status)) {
       return res.status(403).json({ error: 'A loja não pode aplicar esse status' });
@@ -1194,15 +1723,28 @@ app.put('/api/pedidos/:id/status', async (req, res) => {
       return res.status(409).json({ error: 'O pedido ainda não possui confirmação de pagamento' });
     }
 
+    if (status === 'cancelado') {
+      const motivo = textoSeguro(req.body.motivo || 'Cancelado pela loja', 500);
+      await dbTransaction(async tx => {
+        const atual = await tx.get('SELECT * FROM pedidos WHERE id = ? FOR UPDATE', [pedido.id]);
+        await cancelarPedidoComSeguranca(tx, atual, usuario.tipo, motivo);
+      });
+      if (usuario.tipo === 'admin') await registrarAuditoria(req, 'cancelar_pedido', 'pedido', pedido.id, motivo);
+      return res.json({ success: true });
+    }
+
     const updates = []; const params = [];
     if (status) { updates.push('status = ?'); params.push(status); }
-    if (entregador_id !== undefined) { updates.push('entregador_id = ?'); params.push(entregador_id); }
     if (status === 'confirmado') updates.push('data_confirmacao = CURRENT_TIMESTAMP');
     if (status === 'saiu_entrega') updates.push('data_saida = CURRENT_TIMESTAMP');
     if (status === 'entregue') updates.push('data_entrega = CURRENT_TIMESTAMP');
     if (updates.length === 0) return res.status(400).json({ error: 'Nada para atualizar' });
     params.push(req.params.id);
     await dbRun(`UPDATE pedidos SET ${updates.join(', ')} WHERE id = ?`, params);
+    if (status === 'confirmado') {
+      await dbRun(`INSERT INTO notificacoes (tipo_usuario, usuario_id, titulo, mensagem, pedido_id)
+        VALUES ('cliente', ?, 'Pedido aceito pela loja', ?, ?)`, [pedido.cliente_id, `A loja confirmou o pedido #${pedido.id}.`, pedido.id]);
+    }
     res.json({ success: true });
   } catch { res.status(401).json({ error: 'Token inválido' }); }
 });
@@ -1237,6 +1779,32 @@ app.get('/api/categorias', async (req, res) => {
   res.json({ categorias });
 });
 
+app.get('/api/cidades', async (req, res) => {
+  const cidades = await dbAll(`SELECT cidade, estado, fuso_horario,
+    distancia_maxima_entrega FROM configuracoes_cidades WHERE ativa = 1
+    ORDER BY estado, cidade`);
+  res.json({ cidades });
+});
+
+app.get('/api/admin/cidades', authAdmin, async (req, res) => {
+  res.json({ cidades: await dbAll('SELECT * FROM configuracoes_cidades ORDER BY estado, cidade') });
+});
+
+app.put('/api/admin/cidades/:id', authAdmin, async (req, res) => {
+  const cidade = await dbGet('SELECT * FROM configuracoes_cidades WHERE id = ?', [req.params.id]);
+  if (!cidade) return res.status(404).json({ error: 'Cidade não encontrada' });
+  const fuso = textoSeguro(req.body.fuso_horario ?? cidade.fuso_horario, 64);
+  try { new Intl.DateTimeFormat('pt-BR', { timeZone: fuso }).format(new Date()); } catch { return res.status(400).json({ error: 'Fuso horário inválido' }); }
+  const distancia = req.body.distancia_maxima_entrega === undefined || req.body.distancia_maxima_entrega === null || req.body.distancia_maxima_entrega === ''
+    ? null : Number(req.body.distancia_maxima_entrega);
+  if (distancia !== null && (!Number.isFinite(distancia) || distancia < 1 || distancia > 30)) return res.status(400).json({ error: 'Distância máxima inválida' });
+  await dbRun(`UPDATE configuracoes_cidades SET fuso_horario = ?, ativa = ?, distancia_maxima_entrega = ? WHERE id = ?`,
+    [fuso, req.body.ativa === undefined ? cidade.ativa : (req.body.ativa ? 1 : 0), distancia, cidade.id]);
+  await dbRun('UPDATE lojas SET fuso_horario = ? WHERE LOWER(TRIM(cidade)) = LOWER(TRIM(?)) AND UPPER(TRIM(estado)) = UPPER(TRIM(?))', [fuso, cidade.cidade, cidade.estado]);
+  await registrarAuditoria(req, 'configurar_cidade', 'cidade', cidade.id, `${cidade.cidade}/${cidade.estado}`);
+  res.json({ success: true });
+});
+
 // ============ DISTÂNCIA ============
 app.get('/api/distancia', async (req, res) => {
   const { origem_lat, origem_lng, dest_lat, dest_lng } = req.query;
@@ -1259,6 +1827,57 @@ app.post('/api/admin/login', async (req, res) => {
     return res.json({ success: true, token });
   }
   res.status(401).json({ error: 'Credenciais de admin inválidas' });
+});
+
+app.get('/api/admin/cadastros', authAdmin, async (req, res) => {
+  const status = textoSeguro(req.query.status || '', 30);
+  const filtro = status ? ' WHERE status_cadastro = ?' : '';
+  const params = status ? [status] : [];
+  const lojas = await dbAll(`SELECT id, nome, cnpj, email, telefone, cep, cidade, estado,
+    status_cadastro, status_motivo, data_cadastro FROM lojas${filtro} ORDER BY data_cadastro DESC`, params);
+  const entregadores = await dbAll(`SELECT id, nome, cpf, email, telefone, veiculo, placa, cep,
+    cidade, estado, status_cadastro, status_motivo, data_cadastro FROM entregadores${filtro} ORDER BY data_cadastro DESC`, params);
+  const clientes = await dbAll(`SELECT id, nome, email, telefone, cep, cidade, estado,
+    status_cadastro, status_motivo, data_cadastro FROM clientes${filtro} ORDER BY data_cadastro DESC`, params);
+  res.json({ lojas, entregadores, clientes });
+});
+
+app.put('/api/admin/cadastros/:tipo/:id/status', authAdmin, async (req, res) => {
+  const tabelas = { loja: 'lojas', entregador: 'entregadores', cliente: 'clientes' };
+  const tabela = tabelas[req.params.tipo];
+  if (!tabela) return res.status(400).json({ error: 'Tipo de cadastro inválido' });
+  const status = textoSeguro(req.body.status, 30);
+  if (!Object.values(STATUS_CADASTRO).includes(status)) return res.status(400).json({ error: 'Status inválido' });
+  const conta = await dbGet(`SELECT id, nome, cidade, estado FROM ${tabela} WHERE id = ?`, [req.params.id]);
+  if (!conta) return res.status(404).json({ error: 'Cadastro não encontrado' });
+  await dbTransaction(async tx => {
+    await tx.run(`UPDATE ${tabela} SET status_cadastro = ?, status_motivo = ? WHERE id = ?`,
+      [status, textoSeguro(req.body.motivo, 500) || null, conta.id]);
+    if (req.params.tipo === 'entregador' && status !== STATUS_CADASTRO.APROVADO) {
+      await tx.run('UPDATE entregadores SET disponivel = 0 WHERE id = ?', [conta.id]);
+    }
+    if (req.params.tipo === 'loja' && status === STATUS_CADASTRO.APROVADO && conta.cidade && conta.estado) {
+      await tx.run(`INSERT INTO configuracoes_cidades (cidade, estado, fuso_horario, ativa)
+        VALUES (?, ?, 'America/Araguaina', 1)
+        ON CONFLICT DO NOTHING`, [conta.cidade, conta.estado]);
+    }
+    const tipoNotificacao = req.params.tipo === 'loja' ? 'loja' : req.params.tipo === 'entregador' ? 'entregador' : 'cliente';
+    await criarNotificacao(tx, { tipoUsuario: tipoNotificacao, usuarioId: conta.id, titulo: 'Situação do cadastro atualizada', mensagem: status === STATUS_CADASTRO.APROVADO ? 'Seu cadastro foi aprovado.' : `Situação atual: ${status}. ${textoSeguro(req.body.motivo, 300)}` });
+  });
+  await registrarAuditoria(req, 'alterar_status_cadastro', req.params.tipo, conta.id, `${status}: ${textoSeguro(req.body.motivo, 500)}`);
+  res.json({ success: true, status_cadastro: status });
+});
+
+app.get('/api/admin/estoque-baixo', authAdmin, async (req, res) => {
+  const produtos = await dbAll(`SELECT p.id, p.nome, p.estoque, p.estoque_baixo_limite,
+    l.id AS loja_id, l.nome AS loja_nome FROM produtos p JOIN lojas l ON l.id = p.loja_id
+    WHERE p.ativo = 1 AND p.estoque <= p.estoque_baixo_limite ORDER BY p.estoque ASC LIMIT 200`);
+  res.json({ produtos });
+});
+
+app.get('/api/admin/auditoria', authAdmin, async (req, res) => {
+  const registros = await dbAll('SELECT id, acao, entidade, entidade_id, detalhes, criada_em FROM auditoria_admin ORDER BY criada_em DESC LIMIT 200');
+  res.json({ registros });
 });
 
 app.get('/api/admin/configuracoes-entrega', authAdmin, async (req, res) => {
@@ -1324,40 +1943,59 @@ app.put('/api/admin/configuracoes-entrega', authAdmin, async (req, res) => {
   res.json({ success: true, configuracao: await obterConfiguracaoFrete() });
 });
 
-// Excluir a própria conta e seus dados relacionados
+// Exclusão segura: dados pessoais são anonimizados e o histórico transacional
+// obrigatório é preservado para auditoria, reembolso e conciliação.
 app.delete('/api/clientes/:id', authCliente, async (req, res) => {
   if (req.usuario.id != req.params.id) return res.status(403).json({ error: 'Permissão negada' });
   try {
-    await dbRun("DELETE FROM aceites_termos WHERE tipo_usuario = 'cliente' AND usuario_id = ?", [req.params.id]);
-    await dbRun('DELETE FROM avaliacoes WHERE cliente_id = ?', [req.params.id]);
-    await dbRun('DELETE FROM pedidos WHERE cliente_id = ?', [req.params.id]);
-    await dbRun('DELETE FROM clientes WHERE id = ?', [req.params.id]);
-    res.json({ success: true, message: 'Conta do cliente excluída. O e-mail pode ser reutilizado.' });
+    const ativo = await dbGet("SELECT id FROM pedidos WHERE cliente_id = ? AND status NOT IN ('entregue','cancelado') LIMIT 1", [req.params.id]);
+    if (ativo) return res.status(409).json({ error: 'Conclua ou cancele o pedido ativo antes de excluir a conta' });
+    await dbTransaction(async tx => {
+      await tx.run("DELETE FROM aceites_termos WHERE tipo_usuario = 'cliente' AND usuario_id = ?", [req.params.id]);
+      await tx.run("DELETE FROM notificacoes WHERE tipo_usuario = 'cliente' AND usuario_id = ?", [req.params.id]);
+      await tx.run('DELETE FROM avaliacoes WHERE cliente_id = ?', [req.params.id]);
+      await tx.run(`UPDATE clientes SET nome = 'Cliente excluído', email = ?, senha = ?, telefone = NULL,
+        endereco_padrao = NULL, bairro = NULL, cep = NULL, cidade = NULL, estado = NULL,
+        latitude = NULL, longitude = NULL, status_cadastro = 'suspenso', status_motivo = 'Conta excluída pelo titular'
+        WHERE id = ?`, [`excluido-cliente-${req.params.id}-${Date.now()}@invalid.local`, bcrypt.hashSync(crypto.randomBytes(32).toString('hex'), 10), req.params.id]);
+    });
+    res.json({ success: true, message: 'Dados pessoais removidos e histórico transacional anonimizado. O e-mail pode ser reutilizado.' });
   } catch (e) { res.status(500).json({ error: 'Não foi possível excluir a conta' }); }
 });
 
 app.delete('/api/entregadores/:id', authEntregador, async (req, res) => {
   if (req.usuario.id != req.params.id) return res.status(403).json({ error: 'Permissão negada' });
   try {
-    await dbRun("DELETE FROM aceites_termos WHERE tipo_usuario = 'entregador' AND usuario_id = ?", [req.params.id]);
-    await dbRun('DELETE FROM avaliacoes WHERE entregador_id = ?', [req.params.id]);
-    await dbRun('DELETE FROM saldo_entregadores WHERE entregador_id = ?', [req.params.id]);
-    await dbRun('UPDATE pedidos SET entregador_id = NULL WHERE entregador_id = ?', [req.params.id]);
-    await dbRun('DELETE FROM entregadores WHERE id = ?', [req.params.id]);
-    res.json({ success: true, message: 'Conta do entregador excluída. O e-mail e CPF podem ser reutilizados.' });
+    const ativo = await dbGet("SELECT id FROM pedidos WHERE entregador_id = ? AND status IN ('em_coleta','saiu_entrega') LIMIT 1", [req.params.id]);
+    if (ativo) return res.status(409).json({ error: 'Finalize ou devolva a entrega ativa antes de excluir a conta' });
+    await dbTransaction(async tx => {
+      await tx.run("DELETE FROM aceites_termos WHERE tipo_usuario = 'entregador' AND usuario_id = ?", [req.params.id]);
+      await tx.run("DELETE FROM notificacoes WHERE tipo_usuario = 'entregador' AND usuario_id = ?", [req.params.id]);
+      await tx.run('DELETE FROM avaliacoes WHERE entregador_id = ?', [req.params.id]);
+      await tx.run(`UPDATE entregadores SET nome = 'Entregador excluído', cpf = NULL, email = ?, senha = ?, telefone = NULL,
+        placa = NULL, cep = NULL, cidade = NULL, estado = NULL, foto = NULL, chave_pix = NULL,
+        disponivel = 0, latitude = NULL, longitude = NULL, status_cadastro = 'suspenso', status_motivo = 'Conta excluída pelo titular'
+        WHERE id = ?`, [`excluido-entregador-${req.params.id}-${Date.now()}@invalid.local`, bcrypt.hashSync(crypto.randomBytes(32).toString('hex'), 10), req.params.id]);
+    });
+    res.json({ success: true, message: 'Dados pessoais removidos e histórico transacional anonimizado. E-mail e CPF podem ser reutilizados.' });
   } catch (e) { res.status(500).json({ error: 'Não foi possível excluir a conta' }); }
 });
 
 app.delete('/api/lojas/:id', authLojas, async (req, res) => {
   if (req.usuario.id != req.params.id) return res.status(403).json({ error: 'Permissão negada' });
   try {
-    await dbRun("DELETE FROM aceites_termos WHERE tipo_usuario = 'loja' AND usuario_id = ?", [req.params.id]);
-    const pedidos = await dbAll('SELECT id FROM pedidos WHERE loja_id = ?', [req.params.id]);
-    for (const p of pedidos) await dbRun('DELETE FROM avaliacoes WHERE pedido_id = ?', [p.id]);
-    await dbRun('DELETE FROM pedidos WHERE loja_id = ?', [req.params.id]);
-    await dbRun('DELETE FROM produtos WHERE loja_id = ?', [req.params.id]);
-    await dbRun('DELETE FROM lojas WHERE id = ?', [req.params.id]);
-    res.json({ success: true, message: 'Conta da loja e produtos excluídos. O e-mail pode ser reutilizado.' });
+    const ativo = await dbGet("SELECT id FROM pedidos WHERE loja_id = ? AND status NOT IN ('entregue','cancelado') LIMIT 1", [req.params.id]);
+    if (ativo) return res.status(409).json({ error: 'Conclua ou cancele os pedidos ativos antes de excluir a loja' });
+    await dbTransaction(async tx => {
+      await tx.run("DELETE FROM aceites_termos WHERE tipo_usuario = 'loja' AND usuario_id = ?", [req.params.id]);
+      await tx.run("DELETE FROM notificacoes WHERE tipo_usuario = 'loja' AND usuario_id = ?", [req.params.id]);
+      await tx.run('UPDATE produtos SET ativo = 0 WHERE loja_id = ?', [req.params.id]);
+      await tx.run(`UPDATE lojas SET nome = 'Loja excluída', cnpj = NULL, email = ?, senha = ?, telefone = NULL,
+        whatsapp = NULL, chave_pix = NULL, logo = NULL, endereco = NULL, bairro = NULL, cep = NULL,
+        latitude = NULL, longitude = NULL, aberto = 0, status_cadastro = 'suspenso', status_motivo = 'Conta excluída pelo titular'
+        WHERE id = ?`, [`excluido-loja-${req.params.id}-${Date.now()}@invalid.local`, bcrypt.hashSync(crypto.randomBytes(32).toString('hex'), 10), req.params.id]);
+    });
+    res.json({ success: true, message: 'Dados da loja removidos, produtos desativados e histórico transacional anonimizado.' });
   } catch (e) { res.status(500).json({ error: 'Não foi possível excluir a conta da loja' }); }
 });
 
@@ -1365,6 +2003,8 @@ app.delete('/api/lojas/:id', authLojas, async (req, res) => {
 app.post('/api/admin/limpar-dados-teste', authAdmin, async (req, res) => {
   try {
     for (const sql of [
+      'DELETE FROM notificacoes', 'DELETE FROM auditoria_admin', 'DELETE FROM reembolsos',
+      'DELETE FROM reservas_estoque', 'DELETE FROM pagamentos', 'DELETE FROM saques',
       'DELETE FROM aceites_termos', 'DELETE FROM avaliacoes', 'DELETE FROM saldo_plataforma',
       'DELETE FROM movimentacoes_lojas', 'DELETE FROM saldo_lojas',
       'DELETE FROM saldo_entregadores', 'DELETE FROM pedidos',
@@ -1381,6 +2021,9 @@ app.get('/api/admin/dashboard', authAdmin, async (req, res) => {
   const totalClientes = await dbGet('SELECT COUNT(*) as total FROM clientes');
   const pedidosHoje = await dbGet("SELECT COUNT(*) as total FROM pedidos WHERE (data_pedido::timestamptz AT TIME ZONE 'America/Araguaina')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'America/Araguaina')::date");
   const pedidosPendentes = await dbGet("SELECT COUNT(*) as total FROM pedidos WHERE status NOT IN ('entregue', 'cancelado')");
+  const cadastrosPendentes = await dbGet(`SELECT
+    (SELECT COUNT(*) FROM lojas WHERE status_cadastro = 'pendente') +
+    (SELECT COUNT(*) FROM entregadores WHERE status_cadastro = 'pendente') AS total`);
   const faturamento = await dbGet("SELECT COALESCE(SUM(CASE WHEN tipo = 'credito' THEN valor ELSE -valor END), 0) as total FROM saldo_plataforma");
   const ultimosPedidos = await dbAll(`SELECT p.id, p.status, p.total_final, p.data_pedido, 
     l.nome as loja_nome, c.nome as cliente_nome, e.nome as entregador_nome
@@ -1396,6 +2039,7 @@ app.get('/api/admin/dashboard', authAdmin, async (req, res) => {
     clientes: totalClientes?.total || 0,
     pedidosHoje: pedidosHoje?.total || 0,
     pedidosPendentes: pedidosPendentes?.total || 0,
+    cadastrosPendentes: cadastrosPendentes?.total || 0,
     faturamento: faturamento?.total || 0,
     ultimosPedidos
   });

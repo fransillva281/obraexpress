@@ -26,9 +26,12 @@ com uma mensagem clara para impedir gravações temporárias.
    - `EMPRESA_EMAIL_SUPORTE`: contato do consumidor;
    - `EMPRESA_EMAIL_PRIVACIDADE`: contato para pedidos da LGPD.
 8. Crie `PAYMENT_MODE` com o valor `mock`. Esse modo gera apenas uma simulação e não movimenta dinheiro.
-9. Use `npm ci` como **Build Command**.
-10. Use `npm start` como **Start Command**.
-11. Salve escolhendo a opção que também inicia um novo deploy.
+9. Crie `PUBLIC_URL` com `https://obraexpress-1.onrender.com`.
+10. Crie `CORS_ORIGINS` com `https://obraexpress-1.onrender.com`. Quando houver domínio próprio, acrescente-o separado por vírgula.
+11. Crie `TRUST_PROXY` com o valor `1`.
+12. Use `npm ci` como **Build Command**.
+13. Use `npm start` como **Start Command**.
+14. Salve escolhendo a opção que também inicia um novo deploy.
 
 ## 3. Confirmar nos logs
 
@@ -64,6 +67,7 @@ Se o login continuar funcionando, o cadastro permaneceu no PostgreSQL.
   incompleta e os Termos não tiverem sido revisados por profissional jurídico.
 - Não coloque chave de provedor financeiro no GitHub. A versão atual usa apenas
   `PAYMENT_MODE=mock`; o QR Code gerado é uma demonstração que não pode receber dinheiro.
+- Mantenha `PAYMENT_MODE=mock` até a homologação empresarial, financeira e jurídica. Alterar essa variável sozinho não ativa Pix real.
 - Para serviços no mesmo Render e na mesma região, prefira a Internal Database
   URL, conforme a documentação oficial do Render.
 

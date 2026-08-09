@@ -83,6 +83,8 @@ body{background:var(--bg);color:var(--texto)}
       <div class="tab" onclick="mudarAba('pedidos',this)">📋 Pedidos</div>
       <div class="tab" onclick="mudarAba('financeiro',this)">💰 Financeiro</div>
       <div class="tab" onclick="mudarAba('entregas',this)">🧭 Entregas</div>
+      <div class="tab" onclick="mudarAba('cadastros',this)">✅ Cadastros</div>
+      <div class="tab" onclick="mudarAba('operacao',this)">🛡️ Operação</div>
     </div>
 
     <!-- Aba Dashboard -->
@@ -93,6 +95,7 @@ body{background:var(--bg);color:var(--texto)}
         <div class="stat-item"><div class="num" id="stat-clientes">0</div><div class="label">👤 Clientes</div></div>
         <div class="stat-item"><div class="num" id="stat-pedidos-hoje">0</div><div class="label">📦 Pedidos Hoje</div></div>
         <div class="stat-item"><div class="num" id="stat-pendentes">0</div><div class="label">⏳ Pendentes</div></div>
+        <div class="stat-item"><div class="num" id="stat-cadastros-pendentes">0</div><div class="label">✅ Cadastros para analisar</div></div>
         <div class="stat-item"><div class="num" id="stat-faturamento">R$ 0</div><div class="label">💰 Saldo líquido da plataforma</div></div>
       </div>
       
@@ -170,12 +173,58 @@ body{background:var(--bg);color:var(--texto)}
         <div id="cfg-status" class="info" style="margin-top:8px"></div>
       </div>
     </div>
+
+    <!-- Aba Cadastros -->
+    <div id="aba-cadastros" style="display:none">
+      <div class="card">
+        <h3>✅ Verificação de cadastros</h3>
+        <p class="info" style="margin-bottom:12px">Analise os dados antes de aprovar. Contas pendentes não recebem pedidos nem entregas.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+          <button class="btn btn-sm btn-primary" onclick="carregarCadastros('pendente')">Pendentes</button>
+          <button class="btn btn-sm" onclick="carregarCadastros('aprovado')">Aprovados</button>
+          <button class="btn btn-sm" onclick="carregarCadastros('suspenso')">Suspensos</button>
+          <button class="btn btn-sm" onclick="carregarCadastros('')">Todos</button>
+        </div>
+        <div id="lista-cadastros"></div>
+      </div>
+    </div>
+
+    <!-- Aba Operação -->
+    <div id="aba-operacao" style="display:none">
+      <div class="card">
+        <h3>↩️ Cancelamentos e reembolsos</h3>
+        <p class="info">Esta versão registra e testa o fluxo. Dinheiro real só será processado depois da integração com um provedor homologado.</p>
+        <div id="lista-reembolsos"></div>
+      </div>
+      <div class="card">
+        <h3>🏦 Solicitações de retirada</h3>
+        <p class="info">Fila administrativa interna. No modo de teste, “processar” apenas atualiza o saldo do sistema.</p>
+        <div id="lista-saques"></div>
+      </div>
+      <div class="card">
+        <h3>📦 Estoque baixo</h3>
+        <div id="lista-estoque-baixo"></div>
+      </div>
+      <div class="card">
+        <h3>🗺️ Cidades atendidas</h3>
+        <p class="info">Cada cidade nasce quando a primeira loja local é aprovada. Aqui você pode ativar, pausar e limitar a distância.</p>
+        <div id="lista-cidades"></div>
+      </div>
+      <div class="card">
+        <h3>🔎 Auditoria administrativa</h3>
+        <div id="lista-auditoria"></div>
+      </div>
+    </div>
   </div>
 </div>
 
 <script>
 const API = '';
 let token = localStorage.getItem('obraexpress_admin_token');
+
+function h(valor) {
+  return String(valor ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
 
 async function api(path, opts={}) {
   opts.headers = opts.headers || {};
@@ -239,6 +288,7 @@ async function carregarDashboard() {
   document.getElementById('stat-clientes').textContent = r.clientes;
   document.getElementById('stat-pedidos-hoje').textContent = r.pedidosHoje;
   document.getElementById('stat-pendentes').textContent = r.pedidosPendentes;
+  document.getElementById('stat-cadastros-pendentes').textContent = r.cadastrosPendentes || 0;
   document.getElementById('stat-faturamento').textContent = 'R$ ' + Number(r.faturamento || 0).toFixed(2);
   
   if (r.ultimosPedidos) {
@@ -386,6 +436,100 @@ async function salvarConfiguracoesEntrega(){
   document.getElementById('cfg-status').textContent=r.error?'⚠️ '+r.error:'✅ Configuração salva. Os próximos pedidos usarão os novos valores.';
 }
 
+async function carregarCadastros(status='pendente') {
+  const r = await api('/api/admin/cadastros' + (status ? '?status=' + encodeURIComponent(status) : ''));
+  if (r.error) return;
+  const grupos = [
+    ['loja', '🏪 Lojas', r.lojas || []],
+    ['entregador', '🛵 Entregadores', r.entregadores || []],
+    ['cliente', '👤 Clientes', r.clientes || []]
+  ];
+  document.getElementById('lista-cadastros').innerHTML = grupos.map(([tipo, titulo, itens]) => `
+    <h4 style="margin:14px 0 6px">${titulo} (${itens.length})</h4>
+    ${itens.map(item => `
+      <div class="pedido-item">
+        <div class="flex"><strong>${h(item.nome)}</strong><span class="tag">${h(item.status_cadastro)}</span></div>
+        <div class="info">${h(item.email)} • ${h(item.telefone || 'Sem telefone')} • ${h(item.cidade || 'Cidade não informada')}/${h(item.estado || '--')}</div>
+        <div class="info">${tipo === 'loja' ? 'CNPJ: ' + h(item.cnpj) : tipo === 'entregador' ? 'CPF: ' + h(item.cpf) + ' • Placa: ' + h(item.placa) : 'CEP: ' + h(item.cep || 'não informado')}</div>
+        ${item.status_motivo ? `<div class="info">Motivo: ${h(item.status_motivo)}</div>` : ''}
+        <div style="margin-top:6px">
+          <button class="btn btn-sm btn-primary" onclick="alterarCadastro('${tipo}',${Number(item.id)},'aprovado')">Aprovar</button>
+          <button class="btn btn-sm" onclick="alterarCadastro('${tipo}',${Number(item.id)},'recusado')">Recusar</button>
+          <button class="btn btn-sm" onclick="alterarCadastro('${tipo}',${Number(item.id)},'suspenso')">Suspender</button>
+        </div>
+      </div>`).join('') || '<div class="info">Nenhum cadastro nesta situação.</div>'}
+  `).join('');
+}
+
+async function alterarCadastro(tipo, id, status) {
+  let motivo = '';
+  if (status !== 'aprovado') {
+    motivo = prompt('Explique o motivo para que a pessoa saiba o que corrigir:') || '';
+    if (motivo.trim().length < 5) return alert('Informe um motivo com pelo menos 5 letras.');
+  }
+  if (!confirm(`Confirma alterar este cadastro para ${status}?`)) return;
+  const r = await api(`/api/admin/cadastros/${tipo}/${id}/status`, {method:'PUT', body:JSON.stringify({status, motivo})});
+  if (r.error) return alert(r.error);
+  carregarCadastros('pendente');
+}
+
+async function atualizarReembolso(id, status) {
+  const observacao = prompt('Observação administrativa (opcional):') || '';
+  const r = await api('/api/admin/reembolsos/' + id, {method:'PUT', body:JSON.stringify({status, observacao})});
+  if (r.error) return alert(r.error);
+  carregarOperacao();
+}
+
+async function atualizarSaque(id, status) {
+  if (status === 'processado' && !confirm('No modo de teste, isso descontará o saldo interno. Continuar?')) return;
+  const observacao = prompt('Observação administrativa (opcional):') || '';
+  const r = await api('/api/admin/saques/' + id, {method:'PUT', body:JSON.stringify({status, observacao})});
+  if (r.error) return alert(r.error);
+  carregarOperacao();
+}
+
+async function carregarOperacao() {
+  const [rr, rs, re, ra, rc] = await Promise.all([
+    api('/api/admin/reembolsos'), api('/api/admin/saques'), api('/api/admin/estoque-baixo'), api('/api/admin/auditoria'), api('/api/admin/cidades')
+  ]);
+  document.getElementById('lista-reembolsos').innerHTML = (rr.reembolsos || []).map(item => `
+    <div class="pedido-item"><div class="flex"><strong>Pedido #${Number(item.pedido_id)}</strong><span class="tag">${h(item.status)}</span></div>
+    <div class="info">${h(item.cliente_nome)} • ${h(item.loja_nome)} • R$ ${Number(item.valor || 0).toFixed(2)} • ${h(item.motivo)}</div>
+    ${item.status !== 'processado' ? `<button class="btn btn-sm" onclick="atualizarReembolso(${Number(item.id)},'aprovado')">Aprovar</button><button class="btn btn-sm btn-primary" onclick="atualizarReembolso(${Number(item.id)},'processado')">Processar teste</button>` : ''}</div>`
+  ).join('') || '<div class="info">Nenhum reembolso registrado.</div>';
+  document.getElementById('lista-saques').innerHTML = (rs.saques || []).map(item => `
+    <div class="pedido-item"><div class="flex"><strong>${h(item.nome)} (${h(item.tipo_usuario)})</strong><span class="tag">${h(item.status)}</span></div>
+    <div class="info">R$ ${Number(item.valor || 0).toFixed(2)} • chave informada: ${h(item.chave_pix || 'não informada')}</div>
+    ${item.status !== 'processado' ? `<button class="btn btn-sm" onclick="atualizarSaque(${Number(item.id)},'aprovado')">Aprovar</button><button class="btn btn-sm btn-primary" onclick="atualizarSaque(${Number(item.id)},'processado')">Processar teste</button>` : ''}</div>`
+  ).join('') || '<div class="info">Nenhuma retirada solicitada.</div>';
+  document.getElementById('lista-estoque-baixo').innerHTML = (re.produtos || []).map(item => `
+    <div class="pedido-item"><strong>${h(item.nome)}</strong><div class="info">${h(item.loja_nome)} • estoque: ${Number(item.estoque)} • alerta em: ${Number(item.estoque_baixo_limite)}</div></div>`
+  ).join('') || '<div class="info">Nenhum produto com estoque baixo.</div>';
+  document.getElementById('lista-auditoria').innerHTML = (ra.registros || []).map(item => `
+    <div class="pedido-item"><strong>${h(item.acao)}</strong><div class="info">${h(item.entidade)} #${h(item.entidade_id || '-')} • ${h(item.detalhes || '')} • ${h(item.criada_em)}</div></div>`
+  ).join('') || '<div class="info">Nenhuma ação administrativa registrada.</div>';
+  document.getElementById('lista-cidades').innerHTML = (rc.cidades || []).map(item => `
+    <div class="pedido-item"><div class="flex"><strong>${h(item.cidade)}/${h(item.estado)}</strong><span class="tag">${Number(item.ativa)?'ativa':'pausada'}</span></div>
+    <div class="info">Fuso: ${h(item.fuso_horario)} • limite: ${item.distancia_maxima_entrega == null ? 'padrão geral' : Number(item.distancia_maxima_entrega).toFixed(1) + ' km'}</div>
+    <button class="btn btn-sm" onclick="configurarCidade(${Number(item.id)},${Number(item.ativa)?'false':'true'},'${h(item.fuso_horario)}',${item.distancia_maxima_entrega == null ? 'null' : Number(item.distancia_maxima_entrega)})">${Number(item.ativa)?'Pausar':'Ativar'}</button>
+    <button class="btn btn-sm btn-primary" onclick="editarLimiteCidade(${Number(item.id)},${Number(item.ativa)?'true':'false'},'${h(item.fuso_horario)}',${item.distancia_maxima_entrega == null ? 'null' : Number(item.distancia_maxima_entrega)})">Editar limite</button></div>`
+  ).join('') || '<div class="info">Nenhuma cidade cadastrada.</div>';
+}
+
+async function configurarCidade(id, ativa, fuso_horario, distancia_maxima_entrega) {
+  const r = await api('/api/admin/cidades/' + id, {method:'PUT', body:JSON.stringify({ativa, fuso_horario, distancia_maxima_entrega})});
+  if (r.error) return alert(r.error);
+  carregarOperacao();
+}
+
+async function editarLimiteCidade(id, ativa, fuso_horario, atual) {
+  const resposta = prompt('Distância máxima em km (1 a 30). Deixe vazio para usar o padrão geral:', atual == null ? '' : atual);
+  if (resposta === null) return;
+  const distancia_maxima_entrega = resposta.trim() === '' ? null : Number(resposta);
+  if (distancia_maxima_entrega !== null && (!Number.isFinite(distancia_maxima_entrega) || distancia_maxima_entrega < 1 || distancia_maxima_entrega > 30)) return alert('Informe um valor entre 1 e 30.');
+  configurarCidade(id, ativa, fuso_horario, distancia_maxima_entrega);
+}
+
 function mudarAba(aba, el) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
@@ -394,6 +538,8 @@ function mudarAba(aba, el) {
   if (aba === 'pedidos') carregarPedidos('');
   if (aba === 'financeiro') carregarFinanceiro();
   if (aba === 'entregas') carregarConfiguracoesEntrega();
+  if (aba === 'cadastros') carregarCadastros('pendente');
+  if (aba === 'operacao') carregarOperacao();
 }
 
 // Auto login: o servidor confirma se o token salvo ainda é válido.

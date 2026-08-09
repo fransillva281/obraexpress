@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="ObraExpress">
-<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-192.svg">
 <style>
 *{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
 :root{--laranja:#E65100;--laranja-escuro:#BF360C;--laranja-claro:#FFF3E0;--azul:#10333F;--azul-claro:#E8F4F6;--cinza:#37474F;--bg:#F5F7F8;--branco:#fff;--texto:#172126;--texto-sec:#68777E;--borda:#E0E6E8;--verde:#2E7D32;--vermelho:#C62828}
@@ -300,6 +300,7 @@ body{background:linear-gradient(180deg,#F7FAFB 0%,var(--bg) 45%);color:var(--tex
       <h1>📋 Meus Pedidos</h1>
     </div>
   </div>
+  <div id="avisos-cliente"></div>
   <div id="pedidos-list"></div>
   <button class="btn btn-danger" onclick="excluirMinhaConta()" style="margin:16px">🗑️ Excluir minha conta</button>
 </div>
@@ -366,12 +367,24 @@ body{background:linear-gradient(180deg,#F7FAFB 0%,var(--bg) 45%);color:var(--tex
         <input type="text" id="cad-endereco" placeholder="Rua, número, bairro">
       </div>
       <div class="form-group">
+        <label>CEP</label>
+        <input type="text" id="cad-cep" inputmode="numeric" placeholder="00000-000">
+      </div>
+      <div class="form-group">
+        <label>Cidade</label>
+        <input type="text" id="cad-cidade" placeholder="Sua cidade">
+      </div>
+      <div class="form-group">
+        <label>Estado (UF)</label>
+        <input type="text" id="cad-estado" maxlength="2" placeholder="TO">
+      </div>
+      <div class="form-group">
         <button type="button" class="btn btn-primary" onclick="capturarLocalizacaoCadastroCliente()">📍 Marcar minha localização</button>
         <div id="cad-gps-status" style="font-size:12px;color:var(--texto-sec);margin-top:6px">Você também poderá marcar o local no fechamento do pedido.</div>
       </div>
       <div class="form-group">
         <label>Senha</label>
-        <input type="password" id="cad-senha" placeholder="Mínimo 6 caracteres">
+        <input type="password" id="cad-senha" placeholder="Mínimo 8 caracteres">
       </div>
       <label class="legal-check"><input type="checkbox" id="cad-aceite-termos"> <span>Li e aceito os <a href="/termos.html?perfil=cliente#termos" target="_blank" rel="noopener">Termos de Uso e Regras do Cliente</a>.</span></label>
       <label class="legal-check"><input type="checkbox" id="cad-aceite-privacidade"> <span>Li a <a href="/termos.html?perfil=cliente#privacidade" target="_blank" rel="noopener">Política de Privacidade</a> e entendi como meus dados e o GPS são usados.</span></label>
@@ -420,7 +433,9 @@ let cadastroClienteLocalizacao = null;
 let categoriaAtiva = '';
 let categoriasCache = [];
 let searchTimer = null;
+let rastreamentoTimer = null;
 let configuracaoCompra = {pedido_minimo:15, limite_pedido_pequeno:25, taxa_pedido_pequeno:1.99};
+const catalogoProdutos = new Map();
 
 function escaparHtml(valor) {
   return String(valor ?? '').replace(/[&<>"]/g, caractere => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[caractere]));
@@ -428,6 +443,25 @@ function escaparHtml(valor) {
 
 function normalizarTexto(valor) {
   return String(valor ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+}
+
+function textoParaAcao(valor) {
+  return encodeURIComponent(String(valor ?? '')).replace(/'/g, '%27');
+}
+
+function urlComLocalizacao(caminho, parametros={}) {
+  const url = new URL(caminho, location.origin);
+  Object.entries(parametros).forEach(([chave, valor]) => {
+    if (valor !== undefined && valor !== null && valor !== '') url.searchParams.set(chave, valor);
+  });
+  if (usuario?.latitude != null && usuario?.longitude != null) {
+    url.searchParams.set('latitude', usuario.latitude);
+    url.searchParams.set('longitude', usuario.longitude);
+  } else {
+    if (usuario?.cidade) url.searchParams.set('cidade', usuario.cidade);
+    if (usuario?.estado) url.searchParams.set('estado', usuario.estado);
+  }
+  return url.pathname + url.search;
 }
 
 // ============ API ============
@@ -500,6 +534,10 @@ function toast(msg) {
 
 // ============ NAVIGATION ============
 function navigate(page) {
+  if (page !== 'detalhe-pedido' && rastreamentoTimer) {
+    clearInterval(rastreamentoTimer);
+    rastreamentoTimer = null;
+  }
   document.querySelectorAll('.pages').forEach(p => p.classList.remove('active'));
   const el = document.getElementById('page-' + page);
   if (el) el.classList.add('active');
@@ -525,7 +563,7 @@ async function renderCategorias() {
   if (!r.categorias) return;
   categoriasCache = r.categorias;
   document.getElementById('categorias-list').innerHTML = categoriasCache.map(c => `
-    <div class="cat-item" onclick="buscarCategoria('${c.nome.replace(/'/g,"\\'")}')">
+    <div class="cat-item" onclick="buscarCategoria(decodeURIComponent('${textoParaAcao(c.nome)}'))">
       <span class="icon">${c.icone || '📦'}</span>
       <span class="name">${escaparHtml(c.nome)}</span>
     </div>
@@ -546,7 +584,7 @@ function lojaCardHtml(l) {
 }
 
 async function renderLojas() {
-  const r = await api('/api/lojas');
+  const r = await api(urlComLocalizacao('/api/lojas'));
   if (!r.lojas || r.lojas.length === 0) {
     document.getElementById('lojas-list').innerHTML = `<div class="empty-state"><div class="icon">🏪</div><h3>Nenhuma loja disponível</h3></div>`;
     return;
@@ -567,7 +605,7 @@ function buscarCategoria(cat) {
 }
 
 async function carregarProdutosCategoria(cat) {
-  const r = await api('/api/produtos?categoria=' + encodeURIComponent(cat) + '&ordem=menor_preco');
+  const r = await api(urlComLocalizacao('/api/produtos', {categoria:cat, ordem:'menor_preco'}));
   renderComparacaoProdutos(r.produtos || [], cat);
 }
 
@@ -588,6 +626,7 @@ async function abrirLoja(id) {
     </div>
   `;
   const produtosDisponiveis = (r.produtos || []).filter(p => Number(p.categoria_disponivel ?? 1) === 1);
+  produtosDisponiveis.forEach(p => catalogoProdutos.set(Number(p.id), {...p, loja_id:l.id, loja_nome:l.nome}));
   if (produtosDisponiveis.length > 0) {
     document.getElementById('loja-produtos').innerHTML = produtosDisponiveis.map(p => `
       <div class="product-card">
@@ -596,7 +635,7 @@ async function abrirLoja(id) {
           <h4>${p.nome}</h4>
           <div class="loja-nome">${p.marca || ''}</div>
           <div class="preco">R$ ${Number(p.preco).toFixed(2)}</div>
-          <button class="btn-add" onclick="addToCart(${p.id},'${p.nome.replace(/'/g,"\\'")}',${p.preco},${l.id},'${l.nome.replace(/'/g,"\\'")}')">+ Adicionar</button>
+          <button class="btn-add" onclick="adicionarDoCatalogo(${Number(p.id)})">+ Adicionar</button>
         </div>
       </div>
     `).join('');
@@ -622,8 +661,8 @@ async function searchProducts() {
 async function executarBusca(q) {
   const categoriasRequest = categoriasCache.length ? Promise.resolve({categorias: categoriasCache}) : api('/api/categorias');
   const [produtosResposta, lojasResposta, categoriasResposta] = await Promise.all([
-    api('/api/produtos?busca=' + encodeURIComponent(q) + '&ordem=menor_preco'),
-    api('/api/lojas?busca=' + encodeURIComponent(q)),
+    api(urlComLocalizacao('/api/produtos', {busca:q, ordem:'menor_preco'})),
+    api(urlComLocalizacao('/api/lojas', {busca:q})),
     categoriasRequest
   ]);
   if (document.getElementById('search-input-page').value.trim() !== q) return;
@@ -634,6 +673,7 @@ async function executarBusca(q) {
 }
 
 function renderResultadosBusca(produtos, lojas, categorias, termo) {
+  produtos.forEach(p => catalogoProdutos.set(Number(p.id), p));
   const context = document.getElementById('search-context');
   const results = document.getElementById('search-results');
   const total = produtos.length + lojas.length + categorias.length;
@@ -652,7 +692,7 @@ function renderResultadosBusca(produtos, lojas, categorias, termo) {
     <section class="search-section">
       <div class="search-section-title">Categorias <span>${categorias.length} encontrada(s)</span></div>
       <div class="search-category-grid">${categorias.map(c => `
-        <button class="search-category" onclick="buscarCategoria('${c.nome.replace(/'/g,"\\'")}')">${c.icone || '📦'} ${escaparHtml(c.nome)}</button>
+        <button class="search-category" onclick="buscarCategoria(decodeURIComponent('${textoParaAcao(c.nome)}'))">${c.icone || '📦'} ${escaparHtml(c.nome)}</button>
       `).join('')}</div>
     </section>` : '';
 
@@ -674,7 +714,7 @@ function renderResultadosBusca(produtos, lojas, categorias, termo) {
             <div class="loja-nome">🏪 ${escaparHtml(p.loja_nome || '')}${p.loja_bairro ? ` • ${escaparHtml(p.loja_bairro)}` : ''}</div>
             <div class="loja-nome">${escaparHtml(p.categoria || '')}</div>
             <div class="preco">R$ ${Number(p.preco).toFixed(2)}</div>
-            <button class="btn-add" onclick="addToCart(${p.id},'${p.nome.replace(/'/g,"\\'")}',${p.preco},${p.loja_id},'${(p.loja_nome||'').replace(/'/g,"\\'")}')">+ Adicionar</button>
+            <button class="btn-add" onclick="adicionarDoCatalogo(${Number(p.id)})">+ Adicionar</button>
           </div>
         </div>
       `).join('')}</div>
@@ -684,6 +724,7 @@ function renderResultadosBusca(produtos, lojas, categorias, termo) {
 }
 
 function renderComparacaoProdutos(produtos, titulo) {
+  produtos.forEach(p => catalogoProdutos.set(Number(p.id), p));
   const context = document.getElementById('search-context');
   const results = document.getElementById('search-results');
   context.innerHTML = `
@@ -705,13 +746,19 @@ function renderComparacaoProdutos(produtos, titulo) {
           <div class="loja-nome">🏪 ${p.loja_nome || ''}${p.loja_bairro ? ` • ${p.loja_bairro}` : ''}</div>
           <div class="loja-nome">${p.marca || ''}</div>
           <div class="preco">R$ ${Number(p.preco).toFixed(2)}</div>
-          <button class="btn-add" onclick="addToCart(${p.id},'${p.nome.replace(/'/g,"\\'")}',${p.preco},${p.loja_id},'${(p.loja_nome||'').replace(/'/g,"\\'")}')">+ Adicionar</button>
+          <button class="btn-add" onclick="adicionarDoCatalogo(${Number(p.id)})">+ Adicionar</button>
         </div>
       </div>
     `).join('')}</div>`;
 }
 
 // ============ CART ============
+function adicionarDoCatalogo(prodId) {
+  const produto = catalogoProdutos.get(Number(prodId));
+  if (!produto) return toast('Atualize a página e tente novamente');
+  addToCart(Number(produto.id), String(produto.nome), Number(produto.preco), Number(produto.loja_id), String(produto.loja_nome || lojaAtual?.nome || 'Loja'));
+}
+
 function addToCart(prodId, nome, preco, lojaId, lojaNome) {
   if (cart.length > 0 && cart[0].loja_id !== lojaId) {
     return toast('Finalize o pedido da loja atual antes de comprar de outra');
@@ -1027,6 +1074,7 @@ async function renderPedidos() {
     document.getElementById('pedidos-list').innerHTML = `<div class="empty-state"><div class="icon">🔒</div><h3>Faça login</h3><p>Entre para ver seus pedidos</p></div>`;
     return;
   }
+  carregarAvisosCliente();
   const r = await api('/api/pedidos/cliente/' + usuario.id);
   if (!r.pedidos || r.pedidos.length === 0) {
     document.getElementById('pedidos-list').innerHTML = `<div class="empty-state"><div class="icon">📋</div><h3>Nenhum pedido</h3><p>Seus pedidos aparecerão aqui</p></div>`;
@@ -1055,6 +1103,22 @@ async function renderPedidos() {
       ${p.codigo_retirada ? `<div style="font-size:14px;font-weight:700;color:var(--laranja);margin-top:4px">Código retirada: ${p.codigo_retirada}</div>` : ''}
     </div>
   `).join('');
+}
+
+async function carregarAvisosCliente() {
+  const el = document.getElementById('avisos-cliente');
+  if (!el || !usuario) return;
+  const r = await api('/api/notificacoes');
+  if (r.error) return;
+  const recentes = (r.notificacoes || []).slice(0, 5);
+  el.innerHTML = `<div class="confirm-box" style="margin:12px 16px;text-align:left"><strong>🔔 Avisos (${Number(r.nao_lidas || 0)} novos)</strong>
+    ${recentes.map(n => `<div style="padding:8px 0;border-bottom:1px solid var(--borda);${Number(n.lida)?'opacity:.65':''}"><strong>${escaparHtml(n.titulo)}</strong><br><small>${escaparHtml(n.mensagem)}</small></div>`).join('') || '<div style="padding-top:8px">Nenhum aviso.</div>'}
+    ${Number(r.nao_lidas || 0) ? '<button class="btn btn-secondary" style="margin-top:8px" onclick="marcarAvisosCliente()">Marcar como lidos</button>' : ''}</div>`;
+}
+
+async function marcarAvisosCliente() {
+  await api('/api/notificacoes/lidas/todas', {method:'PUT'});
+  carregarAvisosCliente();
 }
 
 async function verDetalhePedido(id) {
@@ -1124,6 +1188,10 @@ async function verDetalhePedido(id) {
           <strong>Veículo:</strong> ${p.entregador_veiculo || 'Não informado'}
         </div>
       ` : ''}
+
+      ${['em_coleta','saiu_entrega'].includes(p.status) ? `<div id="rastreamento-pedido" class="pix-info" style="margin-top:12px">📍 Atualizando a posição da entrega...</div>` : ''}
+
+      ${['aguardando_confirmacao','aguardando_pagamento','aguardando','confirmado'].includes(p.status) ? `<button class="btn btn-danger" onclick="cancelarPedidoCliente(${Number(p.id)})">Cancelar pedido</button>` : ''}
       
       ${p.foto_coleta ? `<div style="margin:12px 0"><strong>📸 Foto da coleta:</strong><br><img src="${p.foto_coleta}" style="width:100%;max-width:300px;border-radius:8px;margin-top:4px"></div>` : ''}
       ${p.foto_entrega ? `<div style="margin:12px 0"><strong>📸 Foto da entrega:</strong><br><img src="${p.foto_entrega}" style="width:100%;max-width:300px;border-radius:8px;margin-top:4px"></div>` : ''}
@@ -1139,6 +1207,32 @@ async function verDetalhePedido(id) {
   
   document.getElementById('detalhe-content').innerHTML = html;
   navigate('detalhe-pedido');
+  if (['em_coleta','saiu_entrega'].includes(p.status)) {
+    carregarRastreamentoPedido(p.id);
+    rastreamentoTimer = setInterval(() => carregarRastreamentoPedido(p.id), 15000);
+  }
+}
+
+async function carregarRastreamentoPedido(pedidoId) {
+  const el = document.getElementById('rastreamento-pedido');
+  if (!el) return;
+  const r = await api('/api/pedidos/' + pedidoId + '/rastreamento');
+  if (r.error) return el.textContent = '⚠️ ' + r.error;
+  if (!r.rastreamento_ativo) return el.textContent = '📍 O rastreamento ficará disponível durante a coleta e a entrega.';
+  el.innerHTML = `<strong>🛵 ${escaparHtml(r.entregador_nome || 'Entregador a caminho')}</strong><br>
+    Distância aproximada: ${r.distancia_restante_km == null ? 'calculando...' : Number(r.distancia_restante_km).toFixed(1) + ' km'}<br>
+    Previsão: ${r.estimativa_minutos == null ? 'calculando...' : 'cerca de ' + Number(r.estimativa_minutos) + ' min'}<br>
+    <small>Atualização automática a cada 15 segundos.</small>`;
+}
+
+async function cancelarPedidoCliente(pedidoId) {
+  const motivo = prompt('Por que você precisa cancelar?');
+  if (!motivo || motivo.trim().length < 5) return toast('Informe um motivo com pelo menos 5 letras');
+  if (!confirm('Confirma o cancelamento deste pedido?')) return;
+  const r = await api('/api/pedidos/' + pedidoId + '/cancelar', {method:'POST', body:JSON.stringify({motivo})});
+  if (r.error) return toast(r.error);
+  toast('Cancelamento registrado com segurança');
+  navigate('pedidos');
 }
 
 // ============ AVALIAÇÃO ============
@@ -1260,15 +1354,19 @@ async function cadastroCliente() {
   const email = document.getElementById('cad-email').value;
   const telefone = document.getElementById('cad-telefone').value;
   const endereco = document.getElementById('cad-endereco').value;
+  const cep = document.getElementById('cad-cep').value;
+  const cidade = document.getElementById('cad-cidade').value;
+  const estado = document.getElementById('cad-estado').value.toUpperCase();
   const senha = document.getElementById('cad-senha').value;
   const aceitou_termos = document.getElementById('cad-aceite-termos').checked;
   const aceitou_privacidade = document.getElementById('cad-aceite-privacidade').checked;
-  if (!nome || !email || !senha) return toast('Preencha nome, email e senha');
+  if (!nome || !email || !senha || !cep || !cidade || estado.length !== 2) return toast('Preencha nome, email, CEP, cidade, estado e senha');
+  if (!cadastroClienteLocalizacao) return toast('Marque a localização do endereço pelo GPS');
   if (!aceitou_termos || !aceitou_privacidade) return toast('Leia e marque as duas confirmações');
   const r = await api('/api/clientes/cadastro', {
     method:'POST',
     body:JSON.stringify({
-      nome, email, senha, telefone, endereco_padrao: endereco,
+      nome, email, senha, telefone, endereco_padrao: endereco, cep, cidade, estado,
       latitude:cadastroClienteLocalizacao?.latitude,
       longitude:cadastroClienteLocalizacao?.longitude,
       aceitou_termos, aceitou_privacidade

@@ -61,10 +61,16 @@ Para instalar no celular:
 3. ✅ **GPS e frete dinâmico**
 4. ✅ **Pedido mínimo e taxa de pedido pequeno configuráveis**
 5. ✅ **Pix de teste** com QR Code, bloqueio do pedido e confirmação pelo administrador
-6. 🔜 **Pix real** com provedor autorizado, conta empresarial e webhooks
-7. 🔜 **Parceria com lojas** de material
-8. 🔜 **Publicação em lojas de aplicativos**, usando contas elegíveis e seguindo as regras vigentes
-9. 🔜 **Notificação WhatsApp** dos pedidos
+6. ✅ **Aprovação de lojas e entregadores** antes de operar
+7. ✅ **Estoque reservado**, cancelamento, reembolso de teste e auditoria
+8. ✅ **Avisos nos painéis**, rastreamento protegido e operação por cidade
+9. 🔜 **Pix real** com provedor autorizado, conta empresarial e webhooks — somente na última fase
+10. 🔜 **Validação empresarial, contábil e jurídica** por responsáveis e profissionais habilitados
+11. 🔜 **Publicação em lojas de aplicativos**, depois de domínio próprio, ícones finais, política revisada e testes de produção
+12. 🔜 **Mensagens externas** por WhatsApp/push, caso seja contratado um provedor
+
+Consulte `RELATORIO_OPERACAO_SEGURA_V11.md` para ver exatamente o que já foi
+implementado e o que depende de serviços ou validações externas.
 
 ---
 

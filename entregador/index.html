@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="ObraExpress Entregador">
-<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-192.svg">
 <style>
 *{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
 :root{--laranja:#E65100;--laranja-escuro:#BF360C;--bg:#F5F5F5;--branco:#fff;--texto:#212121;--texto-sec:#757575;--borda:#E0E0E0;--verde:#2E7D32;--azul:#1565C0;--roxo:#7B1FA2}
@@ -71,7 +71,10 @@ body{background:var(--bg);color:var(--texto)}
       <div class="form-group"><label>Email</label><input type="email" id="cad-email" placeholder="motoboy@email.com"></div>
       <div class="form-group"><label>Telefone</label><input type="text" id="cad-telefone" placeholder="(99) 99999-9999"></div>
       <div class="form-group"><label>Veículo</label><input type="text" id="cad-veiculo" placeholder="Moto, bicicleta, carro"></div>
-      <div class="form-group"><label>Placa (opcional)</label><input type="text" id="cad-placa" placeholder="ABC-1234"></div>
+      <div class="form-group"><label>Placa</label><input type="text" id="cad-placa" placeholder="ABC-1234"></div>
+      <div class="form-group"><label>CEP</label><input type="text" id="cad-cep" inputmode="numeric" placeholder="00000-000"></div>
+      <div class="form-group"><label>Cidade</label><input type="text" id="cad-cidade" placeholder="Palmas"></div>
+      <div class="form-group"><label>Estado (UF)</label><input type="text" id="cad-estado" maxlength="2" placeholder="TO"></div>
       <div class="form-group"><label>Chave Pix (para receber)</label><input type="text" id="cad-pix" placeholder="CPF, email ou telefone"></div>
       <div class="form-group"><label>Senha</label><input type="password" id="cad-senha" placeholder="Crie uma senha"></div>
       <label class="legal-check"><input type="checkbox" id="cad-aceite-termos"> <span>Li e aceito os <a href="/termos.html?perfil=entregador#termos" target="_blank" rel="noopener">Termos de Uso e as Regras do Entregador</a>.</span></label>
@@ -85,6 +88,7 @@ body{background:var(--bg);color:var(--texto)}
 
 <div id="page-dashboard" class="pages" style="display:none">
   <div class="header"><h1>🛵 <span id="entregador-header-name">Painel</span></h1><div class="sub">Suas entregas e saldo</div></div>
+  <div id="cadastro-status-entregador"></div>
   <button id="alerta-som-entregador" class="sound-alert" onclick="alternarAlertasEntregador()">🔕 Ativar alertas sonoros</button>
   <div id="saldo-container"></div>
   <div id="gps-status" class="card" style="border-left:4px solid var(--azul);display:none"></div>
@@ -93,11 +97,13 @@ body{background:var(--bg);color:var(--texto)}
     <button id="tab-disponiveis-entregador" class="tab active" onclick="switchTab('disponiveis',this)">🆕 Disponíveis</button>
     <button class="tab" onclick="switchTab('minhas-entregas',this)">🛵 Minhas</button>
     <button class="tab" onclick="switchTab('perfil',this)">👤 Perfil</button>
+    <button class="tab" onclick="switchTab('avisos',this)">🔔 Avisos</button>
     <button class="tab" onclick="switchTab('termos',this)">📜 Termos</button>
   </div>
   <div id="tab-disponiveis"></div>
   <div id="tab-minhas-entregas" style="display:none"></div>
   <div id="tab-perfil" style="display:none"></div>
+  <div id="tab-avisos" style="display:none"></div>
   <div id="tab-termos" style="display:none"></div>
 </div>
 
@@ -195,6 +201,7 @@ function textoDistanciaColeta(p){
 }
 
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',3000);}
+function escaparHtml(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 async function api(path,opts={}){const h={'Content-Type':'application/json'};if(token)h['Authorization']='Bearer '+token;try{const r=await fetch(API+path,{...opts,headers:h});return await r.json()}catch(e){return{error:e.message}}}
 
 let continuarDepoisAceiteEntregador=null;
@@ -216,7 +223,7 @@ async function confirmarAceiteLegalEntregador(){
 async function verificarAceiteLegalEntregador(){
   if(!token)return false;
   const r=await api('/api/legal/aceite');
-  if(r.termos_pendentes){mostrarAceiteLegalEntregador(()=>{entrarDashboard();iniciarGPS()});return false}
+  if(r.termos_pendentes){mostrarAceiteLegalEntregador(()=>{entrarDashboard();if(entregador.status_cadastro==='aprovado')iniciarGPS()});return false}
   return true;
 }
 
@@ -233,7 +240,7 @@ async function loginEntregador(){
   token=r.token;entregador=r.entregador;
   localStorage.setItem('entregador_token',token);localStorage.setItem('entregador',JSON.stringify(entregador));
   document.getElementById('entregador-header-name').textContent=entregador.nome;
-  const continuar=()=>{toast('Bem-vindo, '+entregador.nome+'!');entrarDashboard();iniciarGPS()};
+  const continuar=()=>{toast('Bem-vindo, '+entregador.nome+'!');entrarDashboard();if(entregador.status_cadastro==='aprovado')iniciarGPS()};
   if(r.termos_pendentes)mostrarAceiteLegalEntregador(continuar);else continuar();
 }
 
@@ -245,13 +252,16 @@ async function cadastroEntregador(){
     telefone:document.getElementById('cad-telefone').value,
     veiculo:document.getElementById('cad-veiculo').value,
     placa:document.getElementById('cad-placa').value,
+    cep:document.getElementById('cad-cep').value,
+    cidade:document.getElementById('cad-cidade').value,
+    estado:document.getElementById('cad-estado').value,
     chave_pix:document.getElementById('cad-pix').value,
     senha:document.getElementById('cad-senha').value,
     aceitou_termos:document.getElementById('cad-aceite-termos').checked,
     aceitou_privacidade:document.getElementById('cad-aceite-privacidade').checked,
     declarou_requisitos_profissionais:document.getElementById('cad-requisitos-profissionais').checked
   };
-  if(!d.nome||!d.email||!d.senha)return toast('Preencha nome, email e senha');
+  if(!d.nome||!d.cpf||!d.email||!d.senha||!d.placa||!d.cidade||!d.estado)return toast('Preencha os dados pessoais, do veículo e da cidade');
   if(!d.aceitou_termos||!d.aceitou_privacidade)return toast('Leia e marque as duas confirmações');
   if(!d.declarou_requisitos_profissionais)return toast('Confirme os requisitos profissionais e de segurança');
   const r=await api('/api/entregadores/cadastro',{method:'POST',body:JSON.stringify(d)});
@@ -259,8 +269,8 @@ async function cadastroEntregador(){
   token=r.token;entregador=r.entregador;
   localStorage.setItem('entregador_token',token);localStorage.setItem('entregador',JSON.stringify(entregador));
   document.getElementById('entregador-header-name').textContent=entregador.nome;
-  toast('Cadastro realizado!');entrarDashboard();
-  iniciarGPS();
+  toast(r.message||'Cadastro enviado para aprovação!');entrarDashboard();
+  if(entregador.status_cadastro==='aprovado')iniciarGPS();
 }
 
 function entrarDashboard(){
@@ -268,9 +278,17 @@ function entrarDashboard(){
   document.getElementById('page-login').classList.remove('active');
   document.getElementById('page-dashboard').style.display='block';
   document.getElementById('page-dashboard').classList.add('active');
+  renderStatusCadastroEntregador();
   atualizarBotaoSomEntregador();
   carregarSaldo();
-  iniciarMonitorEntregas();
+  if(entregador.status_cadastro==='aprovado'||!entregador.status_cadastro)iniciarMonitorEntregas();
+}
+
+function renderStatusCadastroEntregador(){
+  const el=document.getElementById('cadastro-status-entregador');
+  if(!entregador||entregador.status_cadastro==='aprovado'||!entregador.status_cadastro){el.innerHTML='';return;}
+  const titulo=entregador.status_cadastro==='suspenso'?'Conta suspensa':'Cadastro em análise';
+  el.innerHTML=`<div class="card" style="border:2px solid #FFB74D;background:#FFF8E1"><h3>⏳ ${titulo}</h3><div class="meta">Você poderá ficar disponível e aceitar entregas depois da aprovação administrativa.${entregador.status_motivo?'<br>Motivo: '+entregador.status_motivo:''}</div></div>`;
 }
 
 async function iniciarMonitorEntregas(){
@@ -283,15 +301,30 @@ async function iniciarMonitorEntregas(){
 function switchTab(tab,btn){
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   btn.classList.add('active');
-  ['disponiveis','minhas-entregas','perfil','termos'].forEach(t=>document.getElementById('tab-'+t).style.display=t===tab?'block':'none');
+  ['disponiveis','minhas-entregas','perfil','avisos','termos'].forEach(t=>document.getElementById('tab-'+t).style.display=t===tab?'block':'none');
   if(tab==='disponiveis')carregarDisponiveis();
   if(tab==='minhas-entregas')carregarMinhasEntregas();
   if(tab==='perfil')carregarPerfil();
+  if(tab==='avisos')carregarAvisosEntregador();
   if(tab==='termos')carregarTermosEntregador();
 }
 
 function carregarTermosEntregador(){
   document.getElementById('tab-termos').innerHTML=`<div class="card"><h3>📜 Termos, regras e privacidade</h3><p class="meta" style="line-height:1.6;margin:8px 0">Consulte regras de segurança, GPS, carga permitida, comprovantes e cálculo do ganho antes de aceitar entregas.</p><a class="btn btn-primary" href="/termos.html?perfil=entregador" target="_blank" rel="noopener">Abrir documento completo</a></div>`;
+}
+
+async function carregarAvisosEntregador(){
+  const el=document.getElementById('tab-avisos');
+  const r=await api('/api/notificacoes');
+  if(r.error){el.innerHTML=`<div class="card">⚠️ ${escaparHtml(r.error)}</div>`;return;}
+  el.innerHTML=`<div class="card"><h3>🔔 Avisos (${Number(r.nao_lidas||0)} novos)</h3>
+    ${(r.notificacoes||[]).map(n=>`<div style="padding:10px 0;border-bottom:1px solid #eee;${Number(n.lida)?'opacity:.65':''}"><strong>${escaparHtml(n.titulo)}</strong><br><span class="meta">${escaparHtml(n.mensagem)}<br>${escaparHtml(n.criada_em)}</span></div>`).join('')||'<div class="meta">Nenhum aviso.</div>'}
+    ${Number(r.nao_lidas||0)?'<button class="btn btn-primary btn-sm" onclick="marcarAvisosEntregador()">Marcar todos como lidos</button>':''}</div>`;
+}
+
+async function marcarAvisosEntregador(){
+  await api('/api/notificacoes/lidas/todas',{method:'PUT'});
+  carregarAvisosEntregador();
 }
 
 async function carregarSaldo(){
@@ -480,6 +513,9 @@ function carregarPerfil(){
       <h3>📊 Estatísticas</h3>
       <div class="meta" id="stats-entregador">Carregando...</div>
     </div>
+    <div class="card"><h3>🏦 Retirada — somente teste</h3><div class="meta">Registra a solicitação no sistema, sem transferir dinheiro real.</div>
+      <input id="saque-entregador-valor" type="number" min="10" step="0.01" placeholder="Valor (mínimo R$ 10)" style="width:100%;padding:10px;margin:8px 0;border:1px solid #ddd;border-radius:8px">
+      <button class="btn btn-primary btn-sm" onclick="solicitarSaqueEntregadorTeste()">Registrar solicitação de teste</button></div>
     <button class="btn btn-outline" onclick="sair()" style="margin:16px">🚪 Sair</button>
     <button class="btn" onclick="excluirMinhaConta()" style="margin:0 16px 16px;color:#c62828;border:1px solid #c62828">🗑️ Excluir minha conta</button>
   `;
@@ -492,6 +528,16 @@ function carregarPerfil(){
       `;
     }
   });
+}
+
+async function solicitarSaqueEntregadorTeste(){
+  const valor=Number(document.getElementById('saque-entregador-valor')?.value);
+  if(!Number.isFinite(valor)||valor<10)return toast('Informe pelo menos R$ 10,00');
+  if(!confirm('Registrar esta solicitação somente no ambiente de teste?'))return;
+  const r=await api('/api/saques',{method:'POST',body:JSON.stringify({valor})});
+  if(r.error)return toast(r.error);
+  toast(r.message||'Solicitação registrada');
+  carregarPerfil();
 }
 
 async function excluirMinhaConta(){
@@ -515,7 +561,7 @@ function sair(){
 // Init
 if(entregador){
   document.getElementById('entregador-header-name').textContent=entregador.nome;
-  verificarAceiteLegalEntregador().then(ok=>{if(ok){entrarDashboard();iniciarGPS()}});
+  verificarAceiteLegalEntregador().then(ok=>{if(ok){entrarDashboard();if(entregador.status_cadastro==='aprovado')iniciarGPS()}});
 }
 </script>
 <script>
