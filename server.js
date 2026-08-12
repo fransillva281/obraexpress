@@ -31,10 +31,12 @@ const {
   pagamentoExpirado
 } = require('./payment-utils');
 const { calcularJanelaOfertaEntrega } = require('./dispatch-utils');
+const { apenasDigitos, validarCPF, validarCNPJ } = require('./document-validator');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 app.set('trust proxy', Number(process.env.TRUST_PROXY || 1));
+app.disable('x-powered-by');
 
 function requireEnvironment(name) {
   const value = process.env[name];
@@ -48,8 +50,8 @@ const ADMIN_PASSWORD = requireEnvironment('ADMIN_PASSWORD');
 // Esta versão aceita apenas o simulador. Nenhuma chave Pix real é usada.
 const PAYMENT_MODE = process.env.PAYMENT_MODE || 'mock';
 
-const TERMOS_VERSION = '2026-08-04.1';
-const PRIVACIDADE_VERSION = '2026-08-04.1';
+const TERMOS_VERSION = '2026-08-12.1';
+const PRIVACIDADE_VERSION = '2026-08-12.1';
 const STATUS_CADASTRO = Object.freeze({
   PENDENTE: 'pendente',
   APROVADO: 'aprovado',
@@ -72,10 +74,6 @@ function senhaValida(senha) {
   return typeof senha === 'string' && senha.length >= 8 && senha.length <= 128;
 }
 
-function apenasDigitos(valor) {
-  return String(valor || '').replace(/\D/g, '');
-}
-
 function cepValido(cep) {
   return apenasDigitos(cep).length === 8;
 }
@@ -85,8 +83,9 @@ function ufValida(estado) {
 }
 
 function documentoValido(valor, tamanho) {
-  const documento = apenasDigitos(valor);
-  return documento.length === tamanho && !/^(\d)\1+$/.test(documento);
+  if (tamanho === 11) return validarCPF(valor);
+  if (tamanho === 14) return validarCNPJ(valor);
+  return false;
 }
 
 function imagemValida(foto) {
@@ -276,9 +275,31 @@ const origensPermitidas = new Set(
     .split(',').map(item => item.trim()).filter(Boolean)
 );
 app.use(helmet({
-  contentSecurityPolicy: false,
-  crossOriginEmbedderPolicy: false
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", 'data:', 'https:'],
+      connectSrc: ["'self'"],
+      frameSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      baseUri: ["'self'"],
+      formAction: ["'self'"],
+      frameAncestors: ["'self'"]
+    }
+  },
+  crossOriginEmbedderPolicy: false,
+  referrerPolicy: { policy: 'no-referrer' }
 }));
+app.use((req, res, next) => {
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(self)');
+  if (req.path.startsWith('/api/')) {
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+  }
+  next();
+});
 app.use(cors({
   origin(origin, callback) {
     if (!origin || origensPermitidas.has(origin)) return callback(null, true);
@@ -562,6 +583,132 @@ app.post('/api/legal/aceite', async (req, res) => {
   });
 });
 
+// ============ CENTRAL DE PRIVACIDADE E DIREITOS LGPD ============
+const TIPOS_SOLICITACAO_PRIVACIDADE = new Set([
+  'acesso', 'correcao', 'exclusao', 'revisao_decisao_automatizada',
+  'revogacao_consentimento', 'outro'
+]);
+const STATUS_SOLICITACAO_PRIVACIDADE = new Set(['recebida', 'em_analise', 'concluida', 'recusada']);
+
+function exigirTitular(req, res) {
+  if (!['cliente', 'loja', 'entregador'].includes(req.usuario?.tipo)) {
+    res.status(403).json({ error: 'Esta função é exclusiva do titular dos dados' });
+    return false;
+  }
+  return true;
+}
+
+app.get('/api/privacidade/exportar', authQualquer, async (req, res) => {
+  if (!exigirTitular(req, res)) return;
+  const { tipo, id } = req.usuario;
+  let perfil;
+  let historico = [];
+  let dadosComplementares = {};
+
+  if (tipo === 'cliente') {
+    perfil = await dbGet(`SELECT id, nome, email, telefone, endereco_padrao, bairro, cep,
+      cidade, estado, latitude, longitude, status_cadastro, data_cadastro
+      FROM clientes WHERE id = ?`, [id]);
+    historico = await dbAll(`SELECT id, total_produtos, taxa_entrega, taxa_pedido_pequeno,
+      total_final, tipo_entrega, endereco_entrega, bairro_entrega, distancia_km,
+      forma_pagamento, observacao, status, data_pedido, data_confirmacao, data_entrega
+      FROM pedidos WHERE cliente_id = ? ORDER BY data_pedido DESC`, [id]);
+  } else if (tipo === 'loja') {
+    perfil = await dbGet(`SELECT id, nome, cnpj, email, telefone, whatsapp, chave_pix,
+      endereco, bairro, cep, cidade, estado, latitude, longitude, raio_entrega_km,
+      status_cadastro, status_motivo, descricao, categorias, plano, data_cadastro
+      FROM lojas WHERE id = ?`, [id]);
+    historico = await dbAll(`SELECT id, total_produtos, taxa_entrega, taxa_pedido_pequeno,
+      total_final, tipo_entrega, status, data_pedido, data_confirmacao, data_entrega,
+      valor_comissao_loja, valor_liquido_loja
+      FROM pedidos WHERE loja_id = ? ORDER BY data_pedido DESC`, [id]);
+    dadosComplementares.produtos = await dbAll(`SELECT id, nome, descricao, preco, categoria,
+      marca, unidade, estoque, ativo, data_cadastro FROM produtos WHERE loja_id = ?
+      ORDER BY data_cadastro DESC`, [id]);
+  } else {
+    perfil = await dbGet(`SELECT id, nome, cpf, email, telefone, veiculo, placa, cep,
+      cidade, estado, chave_pix, disponivel, avaliacao, total_entregas,
+      status_cadastro, status_motivo, data_cadastro
+      FROM entregadores WHERE id = ?`, [id]);
+    historico = await dbAll(`SELECT id, taxa_entrega, status, data_pedido, data_coleta,
+      data_saida, data_entrega, distancia_coleta_km, distancia_total_entrega_km,
+      valor_motoboy FROM pedidos WHERE entregador_id = ? ORDER BY data_pedido DESC`, [id]);
+  }
+
+  if (!perfil) return res.status(404).json({ error: 'Conta não encontrada' });
+  const aceites = await dbAll(`SELECT versao_termos, versao_privacidade, aceito_em
+    FROM aceites_termos WHERE tipo_usuario = ? AND usuario_id = ? ORDER BY aceito_em DESC`, [tipo, id]);
+  const solicitacoes = await dbAll(`SELECT id, tipo, descricao, status, resposta_admin,
+    criada_em, atualizada_em FROM solicitacoes_privacidade
+    WHERE tipo_usuario = ? AND usuario_id = ? ORDER BY criada_em DESC`, [tipo, id]);
+
+  res.json({
+    gerado_em: new Date().toISOString(),
+    aviso: 'Arquivo destinado ao titular. Guarde-o em local seguro.',
+    tipo_conta: tipo,
+    perfil,
+    historico,
+    aceites,
+    solicitacoes_privacidade: solicitacoes,
+    ...dadosComplementares
+  });
+});
+
+app.get('/api/privacidade/solicitacoes', authQualquer, async (req, res) => {
+  if (!exigirTitular(req, res)) return;
+  const solicitacoes = await dbAll(`SELECT id, tipo, descricao, status, resposta_admin,
+    criada_em, atualizada_em FROM solicitacoes_privacidade
+    WHERE tipo_usuario = ? AND usuario_id = ? ORDER BY criada_em DESC LIMIT 50`,
+  [req.usuario.tipo, req.usuario.id]);
+  res.json({ solicitacoes });
+});
+
+app.post('/api/privacidade/solicitacoes', authQualquer, async (req, res) => {
+  if (!exigirTitular(req, res)) return;
+  const tipoSolicitacao = textoSeguro(req.body.tipo, 50);
+  const descricao = textoSeguro(req.body.descricao, 1000);
+  if (!TIPOS_SOLICITACAO_PRIVACIDADE.has(tipoSolicitacao)) {
+    return res.status(400).json({ error: 'Escolha um tipo de solicitação válido' });
+  }
+  const recentes = await dbGet(`SELECT COUNT(*) AS total FROM solicitacoes_privacidade
+    WHERE tipo_usuario = ? AND usuario_id = ? AND criada_em > CURRENT_TIMESTAMP - INTERVAL '24 hours'`,
+  [req.usuario.tipo, req.usuario.id]);
+  if (Number(recentes?.total || 0) >= 5) {
+    return res.status(429).json({ error: 'Limite diário atingido. Aguarde para enviar uma nova solicitação.' });
+  }
+  const resultado = await dbRun(`INSERT INTO solicitacoes_privacidade
+    (tipo_usuario, usuario_id, tipo, descricao) VALUES (?, ?, ?, ?)`,
+  [req.usuario.tipo, req.usuario.id, tipoSolicitacao, descricao || null]);
+  await criarNotificacao({ run: dbRun }, {
+    tipoUsuario: 'admin',
+    titulo: 'Nova solicitação de privacidade',
+    mensagem: `${req.usuario.tipo} enviou uma solicitação do tipo ${tipoSolicitacao}.`
+  });
+  res.status(201).json({
+    success: true,
+    id: resultado.lastID,
+    status: 'recebida',
+    message: 'Solicitação registrada. Acompanhe a resposta nesta central.'
+  });
+});
+
+app.get('/api/privacidade/verificacao-identidade', authQualquer, async (req, res) => {
+  if (!exigirTitular(req, res)) return;
+  if (!['loja', 'entregador'].includes(req.usuario.tipo)) {
+    return res.json({ aplicavel: false, coleta_biometrica_ativa: false });
+  }
+  const verificacao = await dbGet(`SELECT status, provedor, resultado_codigo, motivo,
+    criada_em, atualizada_em, verificada_em FROM verificacoes_identidade
+    WHERE tipo_usuario = ? AND usuario_id = ?`, [req.usuario.tipo, req.usuario.id]);
+  res.json({
+    aplicavel: true,
+    coleta_biometrica_ativa: false,
+    status: verificacao?.status || 'nao_iniciada',
+    aviso: 'O ObraExpress ainda não recebe CNH, selfies ou biometria. A validação será ativada somente com provedor especializado e armazenamento privado.',
+    verificacao: verificacao || null
+  });
+});
+
 // ============ NOTIFICAÇÕES ============
 app.get('/api/notificacoes', authQualquer, async (req, res) => {
   const notificacoes = await dbAll(`SELECT id, titulo, mensagem, pedido_id, lida, criada_em
@@ -611,6 +758,9 @@ app.post('/api/lojas/cadastro', async (req, res) => {
         textoSeguro(descricao, 1000), textoSeguro(categorias, 1000), taxaKm, textoSeguro(chave_pix, 180) || null,
         planoEscolhido, 5, textoSeguro(tempo_entrega_min, 40) || '30-60 min',
         Math.min(Math.max(Number(raio_entrega_km || 8), 1), 30)]);
+      await tx.run(`INSERT INTO verificacoes_identidade (tipo_usuario, usuario_id, status)
+        VALUES ('loja', ?, 'nao_iniciada')
+        ON CONFLICT (tipo_usuario, usuario_id) DO NOTHING`, [insercao.lastID]);
       await registrarAceiteTermos('loja', insercao.lastID, req, tx);
       await criarNotificacao(tx, { tipoUsuario: 'admin', titulo: 'Nova loja aguardando aprovação', mensagem: `${textoSeguro(nome, 160)} enviou um cadastro para análise.` });
       return insercao;
@@ -920,6 +1070,9 @@ app.post('/api/entregadores/cadastro', async (req, res) => {
         textoSeguro(chave_pix, 180) || null, cep ? apenasDigitos(cep) : null,
         textoSeguro(cidade, 120), String(estado).trim().toUpperCase()]);
       await tx.run('INSERT INTO saldo_entregadores (entregador_id, saldo) VALUES (?, 0) ON CONFLICT (entregador_id) DO NOTHING', [insercao.lastID]);
+      await tx.run(`INSERT INTO verificacoes_identidade (tipo_usuario, usuario_id, status)
+        VALUES ('entregador', ?, 'nao_iniciada')
+        ON CONFLICT (tipo_usuario, usuario_id) DO NOTHING`, [insercao.lastID]);
       await registrarAceiteTermos('entregador', insercao.lastID, req, tx);
       await criarNotificacao(tx, { tipoUsuario: 'admin', titulo: 'Novo entregador aguardando aprovação', mensagem: `${textoSeguro(nome, 160)} enviou um cadastro para análise.` });
       return insercao;
@@ -1867,6 +2020,63 @@ app.post('/api/admin/login', async (req, res) => {
   res.status(401).json({ error: 'Credenciais de admin inválidas' });
 });
 
+app.get('/api/admin/privacidade/resumo', authAdmin, async (req, res) => {
+  const porStatus = await dbAll(`SELECT status, COUNT(*)::integer AS total
+    FROM solicitacoes_privacidade GROUP BY status ORDER BY status`);
+  res.json({
+    solicitacoes_por_status: porStatus,
+    coleta_biometrica_ativa: false,
+    provedor_identidade_configurado: false,
+    armazenamento_documentos: 'bloqueado',
+    aviso: 'Não envie nem solicite documentos reais por este painel enquanto o provedor seguro não estiver integrado.'
+  });
+});
+
+app.get('/api/admin/privacidade/solicitacoes', authAdmin, async (req, res) => {
+  const status = textoSeguro(req.query.status || '', 30);
+  if (status && !STATUS_SOLICITACAO_PRIVACIDADE.has(status)) {
+    return res.status(400).json({ error: 'Status inválido' });
+  }
+  const filtro = status ? 'WHERE sp.status = ?' : '';
+  const params = status ? [status] : [];
+  const solicitacoes = await dbAll(`SELECT sp.*,
+    CASE sp.tipo_usuario
+      WHEN 'cliente' THEN (SELECT nome FROM clientes WHERE id = sp.usuario_id)
+      WHEN 'loja' THEN (SELECT nome FROM lojas WHERE id = sp.usuario_id)
+      WHEN 'entregador' THEN (SELECT nome FROM entregadores WHERE id = sp.usuario_id)
+    END AS nome_titular,
+    CASE sp.tipo_usuario
+      WHEN 'cliente' THEN (SELECT email FROM clientes WHERE id = sp.usuario_id)
+      WHEN 'loja' THEN (SELECT email FROM lojas WHERE id = sp.usuario_id)
+      WHEN 'entregador' THEN (SELECT email FROM entregadores WHERE id = sp.usuario_id)
+    END AS email_titular
+    FROM solicitacoes_privacidade sp ${filtro}
+    ORDER BY CASE WHEN sp.status IN ('recebida','em_analise') THEN 0 ELSE 1 END,
+      sp.criada_em ASC LIMIT 200`, params);
+  res.json({ solicitacoes });
+});
+
+app.put('/api/admin/privacidade/solicitacoes/:id', authAdmin, async (req, res) => {
+  const solicitacao = await dbGet('SELECT * FROM solicitacoes_privacidade WHERE id = ?', [req.params.id]);
+  if (!solicitacao) return res.status(404).json({ error: 'Solicitação não encontrada' });
+  const status = textoSeguro(req.body.status, 30);
+  const resposta = textoSeguro(req.body.resposta, 1500);
+  if (!STATUS_SOLICITACAO_PRIVACIDADE.has(status)) return res.status(400).json({ error: 'Status inválido' });
+  if (['concluida', 'recusada'].includes(status) && resposta.length < 10) {
+    return res.status(400).json({ error: 'Explique a decisão ao titular com pelo menos 10 caracteres' });
+  }
+  await dbRun(`UPDATE solicitacoes_privacidade SET status = ?, resposta_admin = ?,
+    atualizada_em = CURRENT_TIMESTAMP WHERE id = ?`, [status, resposta || null, solicitacao.id]);
+  await criarNotificacao({ run: dbRun }, {
+    tipoUsuario: solicitacao.tipo_usuario,
+    usuarioId: solicitacao.usuario_id,
+    titulo: 'Solicitação de privacidade atualizada',
+    mensagem: `Sua solicitação #${solicitacao.id} agora está como ${status}. ${resposta}`
+  });
+  await registrarAuditoria(req, 'responder_privacidade', 'solicitacao_privacidade', solicitacao.id, `${status}: ${resposta}`);
+  res.json({ success: true });
+});
+
 app.get('/api/admin/cadastros', authAdmin, async (req, res) => {
   const status = textoSeguro(req.query.status || '', 30);
   const filtro = status ? ' WHERE status_cadastro = ?' : '';
@@ -1994,6 +2204,9 @@ app.delete('/api/clientes/:id', authCliente, async (req, res) => {
     const ativo = await dbGet("SELECT id FROM pedidos WHERE cliente_id = ? AND status NOT IN ('entregue','cancelado') LIMIT 1", [req.params.id]);
     if (ativo) return res.status(409).json({ error: 'Conclua ou cancele o pedido ativo antes de excluir a conta' });
     await dbTransaction(async tx => {
+      await tx.run(`UPDATE solicitacoes_privacidade SET descricao = NULL,
+        resposta_admin = 'Conta anonimizada a pedido do titular', status = 'concluida',
+        atualizada_em = CURRENT_TIMESTAMP WHERE tipo_usuario = 'cliente' AND usuario_id = ?`, [req.params.id]);
       await tx.run("DELETE FROM aceites_termos WHERE tipo_usuario = 'cliente' AND usuario_id = ?", [req.params.id]);
       await tx.run("DELETE FROM notificacoes WHERE tipo_usuario = 'cliente' AND usuario_id = ?", [req.params.id]);
       await tx.run('DELETE FROM avaliacoes WHERE cliente_id = ?', [req.params.id]);
@@ -2012,6 +2225,12 @@ app.delete('/api/entregadores/:id', authEntregador, async (req, res) => {
     const ativo = await dbGet("SELECT id FROM pedidos WHERE entregador_id = ? AND status IN ('em_coleta','saiu_entrega') LIMIT 1", [req.params.id]);
     if (ativo) return res.status(409).json({ error: 'Finalize ou devolva a entrega ativa antes de excluir a conta' });
     await dbTransaction(async tx => {
+      await tx.run(`UPDATE solicitacoes_privacidade SET descricao = NULL,
+        resposta_admin = 'Conta anonimizada a pedido do titular', status = 'concluida',
+        atualizada_em = CURRENT_TIMESTAMP WHERE tipo_usuario = 'entregador' AND usuario_id = ?`, [req.params.id]);
+      await tx.run(`UPDATE verificacoes_identidade SET referencia_externa = NULL,
+        resultado_codigo = NULL, motivo = 'Conta anonimizada', status = 'nao_iniciada',
+        atualizada_em = CURRENT_TIMESTAMP WHERE tipo_usuario = 'entregador' AND usuario_id = ?`, [req.params.id]);
       await tx.run("DELETE FROM aceites_termos WHERE tipo_usuario = 'entregador' AND usuario_id = ?", [req.params.id]);
       await tx.run("DELETE FROM notificacoes WHERE tipo_usuario = 'entregador' AND usuario_id = ?", [req.params.id]);
       await tx.run('DELETE FROM avaliacoes WHERE entregador_id = ?', [req.params.id]);
@@ -2030,6 +2249,12 @@ app.delete('/api/lojas/:id', authLojas, async (req, res) => {
     const ativo = await dbGet("SELECT id FROM pedidos WHERE loja_id = ? AND status NOT IN ('entregue','cancelado') LIMIT 1", [req.params.id]);
     if (ativo) return res.status(409).json({ error: 'Conclua ou cancele os pedidos ativos antes de excluir a loja' });
     await dbTransaction(async tx => {
+      await tx.run(`UPDATE solicitacoes_privacidade SET descricao = NULL,
+        resposta_admin = 'Conta anonimizada a pedido do titular', status = 'concluida',
+        atualizada_em = CURRENT_TIMESTAMP WHERE tipo_usuario = 'loja' AND usuario_id = ?`, [req.params.id]);
+      await tx.run(`UPDATE verificacoes_identidade SET referencia_externa = NULL,
+        resultado_codigo = NULL, motivo = 'Conta anonimizada', status = 'nao_iniciada',
+        atualizada_em = CURRENT_TIMESTAMP WHERE tipo_usuario = 'loja' AND usuario_id = ?`, [req.params.id]);
       await tx.run("DELETE FROM aceites_termos WHERE tipo_usuario = 'loja' AND usuario_id = ?", [req.params.id]);
       await tx.run("DELETE FROM notificacoes WHERE tipo_usuario = 'loja' AND usuario_id = ?", [req.params.id]);
       await tx.run('UPDATE produtos SET ativo = 0 WHERE loja_id = ?', [req.params.id]);
@@ -2050,7 +2275,8 @@ app.post('/api/admin/limpar-dados-teste', authAdmin, async (req, res) => {
   try {
     await dbTransaction(async tx => {
       for (const sql of [
-        'DELETE FROM notificacoes', 'DELETE FROM auditoria_admin', 'DELETE FROM reembolsos',
+        'DELETE FROM notificacoes', 'DELETE FROM auditoria_admin', 'DELETE FROM solicitacoes_privacidade',
+        'DELETE FROM verificacoes_identidade', 'DELETE FROM reembolsos',
         'DELETE FROM reservas_estoque', 'DELETE FROM pagamentos', 'DELETE FROM saques',
         'DELETE FROM aceites_termos', 'DELETE FROM avaliacoes', 'DELETE FROM saldo_plataforma',
         'DELETE FROM movimentacoes_lojas', 'DELETE FROM saldo_lojas',

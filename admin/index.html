@@ -84,6 +84,7 @@ body{background:var(--bg);color:var(--texto)}
       <div class="tab" onclick="mudarAba('financeiro',this)">💰 Financeiro</div>
       <div class="tab" onclick="mudarAba('entregas',this)">🧭 Entregas</div>
       <div class="tab" onclick="mudarAba('cadastros',this)">✅ Cadastros</div>
+      <div class="tab" onclick="mudarAba('privacidade',this)">🛡️ Privacidade</div>
       <div class="tab" onclick="mudarAba('operacao',this)">🛡️ Operação</div>
     </div>
 
@@ -189,6 +190,28 @@ body{background:var(--bg);color:var(--texto)}
           <button class="btn btn-sm filtro-cadastros" data-status="" onclick="carregarCadastros('')">Todos</button>
         </div>
         <div id="lista-cadastros"></div>
+      </div>
+    </div>
+
+    <!-- Aba Privacidade -->
+    <div id="aba-privacidade" style="display:none">
+      <div class="card" style="border-left:5px solid #2E7D32">
+        <h3>🛡️ Proteção de dados</h3>
+        <p class="info" id="privacidade-resumo">Carregando situação...</p>
+      </div>
+      <div class="card" style="border-left:5px solid #E65100">
+        <h3>🪪 Documentos e reconhecimento facial</h3>
+        <p class="info"><strong>Coleta bloqueada nesta versão.</strong> Não solicite CNH, selfie ou biometria por WhatsApp, e-mail ou campos comuns. Essa função somente será ativada depois da integração com provedor especializado e armazenamento privado.</p>
+      </div>
+      <div class="card">
+        <h3>📨 Solicitações dos titulares</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+          <button class="btn btn-sm filtro-privacidade" data-status="" onclick="carregarPrivacidade('')">Todas</button>
+          <button class="btn btn-sm filtro-privacidade" data-status="recebida" onclick="carregarPrivacidade('recebida')">Recebidas</button>
+          <button class="btn btn-sm filtro-privacidade" data-status="em_analise" onclick="carregarPrivacidade('em_analise')">Em análise</button>
+          <button class="btn btn-sm filtro-privacidade" data-status="concluida" onclick="carregarPrivacidade('concluida')">Concluídas</button>
+        </div>
+        <div id="lista-privacidade"></div>
       </div>
     </div>
 
@@ -559,6 +582,43 @@ async function editarLimiteCidade(id, ativa, fuso_horario, atual) {
   configurarCidade(id, ativa, fuso_horario, distancia_maxima_entrega);
 }
 
+async function carregarPrivacidade(status='') {
+  document.querySelectorAll('.filtro-privacidade').forEach(botao => botao.classList.toggle('btn-primary', botao.dataset.status === status));
+  const [resumo, resposta] = await Promise.all([
+    api('/api/admin/privacidade/resumo'),
+    api('/api/admin/privacidade/solicitacoes' + (status ? '?status=' + encodeURIComponent(status) : ''))
+  ]);
+  if (!resumo.error) {
+    const totais = Object.fromEntries((resumo.solicitacoes_por_status || []).map(item => [item.status, Number(item.total)]));
+    document.getElementById('privacidade-resumo').innerHTML = `✅ Central ativa • Recebidas: <strong>${totais.recebida || 0}</strong> • Em análise: <strong>${totais.em_analise || 0}</strong> • Concluídas: <strong>${totais.concluida || 0}</strong><br>🔒 Documentos e biometria: <strong>bloqueados</strong> até integração segura.`;
+  }
+  if (resposta.error) {
+    document.getElementById('lista-privacidade').innerHTML = `<div class="info">⚠️ ${h(resposta.error)}</div>`;
+    return;
+  }
+  document.getElementById('lista-privacidade').innerHTML = (resposta.solicitacoes || []).map(item => `
+    <div class="pedido-item">
+      <div class="flex"><strong>Protocolo #${Number(item.id)} — ${h(String(item.tipo).replaceAll('_',' '))}</strong><span class="tag">${h(item.status)}</span></div>
+      <div class="info">${h(item.nome_titular || 'Titular não identificado')} • ${h(item.tipo_usuario)} • ${h(item.email_titular || '')}</div>
+      <div style="margin-top:7px">${h(item.descricao || 'Sem descrição adicional')}</div>
+      ${item.resposta_admin ? `<div class="info" style="margin-top:6px"><strong>Resposta:</strong> ${h(item.resposta_admin)}</div>` : ''}
+      <div class="info">Recebida em ${h(item.criada_em)}</div>
+      ${!['concluida','recusada'].includes(item.status) ? `<div style="margin-top:7px"><button class="btn btn-sm" onclick="responderPrivacidade(${Number(item.id)},'em_analise')">Marcar em análise</button><button class="btn btn-sm btn-primary" onclick="responderPrivacidade(${Number(item.id)},'concluida')">Responder e concluir</button><button class="btn btn-sm" onclick="responderPrivacidade(${Number(item.id)},'recusada')">Recusar com motivo</button></div>` : ''}
+    </div>`).join('') || '<div class="info">Nenhuma solicitação nesta situação.</div>';
+}
+
+async function responderPrivacidade(id, status) {
+  let resposta = '';
+  if (status === 'concluida' || status === 'recusada') {
+    resposta = prompt('Escreva uma resposta clara para o titular. Não inclua senha, documento completo ou outros dados sensíveis:') || '';
+    if (resposta.trim().length < 10) return alert('A resposta precisa ter pelo menos 10 caracteres.');
+  }
+  if (!confirm(`Confirma atualizar o protocolo #${id} para ${status}?`)) return;
+  const r = await api('/api/admin/privacidade/solicitacoes/' + id, {method:'PUT', body:JSON.stringify({status, resposta})});
+  if (r.error) return alert(r.error);
+  carregarPrivacidade('');
+}
+
 function mudarAba(aba, el) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
@@ -568,6 +628,7 @@ function mudarAba(aba, el) {
   if (aba === 'financeiro') carregarFinanceiro();
   if (aba === 'entregas') carregarConfiguracoesEntrega();
   if (aba === 'cadastros') carregarCadastros('pendente');
+  if (aba === 'privacidade') carregarPrivacidade('');
   if (aba === 'operacao') carregarOperacao();
 }
 

@@ -297,7 +297,7 @@ function switchDashboardTab(tab,btn){
 }
 
 function carregarTermosLoja(){
-  document.getElementById('dash-termos').innerHTML=`<div class="card"><h3>📜 Termos, regras e privacidade</h3><p class="meta" style="line-height:1.6;margin:8px 0">Consulte as responsabilidades da loja, produtos permitidos, comissão, entrega, cancelamento e tratamento de dados.</p><a class="btn btn-primary" href="/termos.html?perfil=loja" target="_blank" rel="noopener">Abrir documento completo</a></div>`;
+  document.getElementById('dash-termos').innerHTML=`<div class="card"><h3>📜 Termos, regras e privacidade</h3><p class="meta" style="line-height:1.6;margin:8px 0">Consulte as responsabilidades da loja, produtos permitidos, comissão, entrega, cancelamento e tratamento de dados.</p><a class="btn btn-primary" href="/termos.html?perfil=loja" target="_blank" rel="noopener">Abrir documento completo</a><a class="btn" href="/privacidade.html?perfil=loja" style="border:2px solid var(--laranja);color:var(--laranja)">🛡️ Central de Privacidade e meus dados</a></div>`;
 }
 
 async function carregarAvisosLoja(){

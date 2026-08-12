@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Central de Privacidade — ObraExpress</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f5f7f8;color:#1f2933;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}.topo{background:linear-gradient(135deg,#bf360c,#ef6c00);color:#fff;padding:24px}.topo h1{margin:0 0 6px;font-size:25px}.topo p{margin:0;opacity:.9}.container{max-width:820px;margin:0 auto;padding:18px}.card{background:#fff;border-radius:14px;padding:18px;margin-bottom:14px;box-shadow:0 2px 8px #0000000d}.card h2{font-size:18px;color:#bf360c;margin:0 0 10px}.aviso{border-left:5px solid #ef6c00;background:#fff8f1}.seguro{border-left:5px solid #2e7d32;background:#f3fff5}.erro{border-left:5px solid #c62828;background:#fff5f5}.btn{display:inline-block;border:0;border-radius:9px;background:#e65100;color:#fff;padding:11px 16px;font-weight:700;cursor:pointer;text-decoration:none;margin:4px 4px 4px 0}.btn-sec{background:#fff;color:#bf360c;border:1px solid #bf360c}.form-group{margin:12px 0}.form-group label{display:block;font-size:13px;font-weight:700;margin-bottom:5px}.form-group select,.form-group textarea{width:100%;border:1px solid #cfd8dc;border-radius:9px;padding:11px;font:inherit}.form-group textarea{min-height:105px;resize:vertical}.item{padding:12px 0;border-bottom:1px solid #eceff1}.item:last-child{border-bottom:0}.tag{display:inline-block;border-radius:99px;background:#fff3e0;color:#bf360c;font-size:12px;font-weight:700;padding:4px 9px}.meta{font-size:12px;color:#607d8b;margin-top:5px;line-height:1.5}.vazio{color:#607d8b;padding:12px 0}.oculto{display:none}</style>
+</head>
+<body>
+<header class="topo"><h1>🛡️ Central de Privacidade</h1><p>Seus dados e seus direitos na ObraExpress</p></header>
+<main class="container">
+  <section id="sem-sessao" class="card aviso oculto">
+    <h2>Entre na sua conta</h2>
+    <p>Abra primeiro o painel de cliente, loja ou entregador e faça login. Depois volte a esta página.</p>
+    <a class="btn" href="/">Painel do cliente</a><a class="btn btn-sec" href="/loja/">Painel da loja</a><a class="btn btn-sec" href="/entregador/">Painel do entregador</a>
+  </section>
+
+  <div id="conteudo" class="oculto">
+    <section class="card seguro">
+      <h2>Conta identificada</h2>
+      <p id="identidade">Carregando...</p>
+      <p class="meta">Somente você, usando sua sessão, pode acessar esta central. Não compartilhe o arquivo baixado.</p>
+    </section>
+
+    <section class="card">
+      <h2>📥 Baixar uma cópia dos meus dados</h2>
+      <p>Gera um arquivo com os dados do perfil, histórico relacionado à conta, aceites e solicitações de privacidade. Senha não é incluída.</p>
+      <button class="btn" onclick="baixarMeusDados()">Baixar meus dados</button>
+      <div id="exportacao-status" class="meta"></div>
+    </section>
+
+    <section id="identidade-card" class="card aviso oculto">
+      <h2>🪪 Verificação de identidade</h2>
+      <p id="identidade-status"></p>
+      <p class="meta"><strong>Proteção ativa:</strong> esta versão não permite enviar CNH, selfie ou biometria. Nunca envie esses arquivos por e-mail, WhatsApp ou campo de texto.</p>
+    </section>
+
+    <section class="card">
+      <h2>📝 Exercer um direito</h2>
+      <div class="form-group"><label for="tipo">O que você deseja?</label><select id="tipo">
+        <option value="acesso">Confirmar acesso aos meus dados</option>
+        <option value="correcao">Corrigir informação</option>
+        <option value="exclusao">Solicitar exclusão ou anonimização</option>
+        <option value="revisao_decisao_automatizada">Pedir revisão de decisão automatizada</option>
+        <option value="revogacao_consentimento">Revogar consentimento opcional</option>
+        <option value="outro">Outro assunto de privacidade</option>
+      </select></div>
+      <div class="form-group"><label for="descricao">Explique o pedido sem enviar documentos ou dados desnecessários</label><textarea id="descricao" maxlength="1000" placeholder="Exemplo: quero corrigir meu telefone cadastrado."></textarea></div>
+      <button class="btn" onclick="enviarSolicitacao()">Enviar solicitação</button>
+      <div id="envio-status" class="meta"></div>
+    </section>
+
+    <section class="card">
+      <h2>📋 Minhas solicitações</h2>
+      <div id="lista-solicitacoes"><div class="vazio">Carregando...</div></div>
+    </section>
+
+    <section class="card aviso">
+      <h2>Exclusão imediata da conta</h2>
+      <p>O botão de exclusão continua no perfil de cada painel. Pedidos ou entregas em andamento precisam ser concluídos ou cancelados antes. Alguns registros podem ser anonimizados e preservados quando houver obrigação legal ou necessidade de defesa.</p>
+      <a class="btn btn-sec" id="voltar-painel" href="/">Voltar ao meu painel</a>
+    </section>
+  </div>
+</main>
+<script>
+let sessao = null;
+
+function h(valor){return String(valor??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+function descobrirSessao(){
+  const perfilSolicitado=new URLSearchParams(location.search).get('perfil');
+  const cliente=JSON.parse(localStorage.getItem('obraexpress_cliente')||'null');
+  const tokenLoja=localStorage.getItem('loja_token');
+  const loja=JSON.parse(localStorage.getItem('loja')||'null');
+  const tokenEntregador=localStorage.getItem('entregador_token');
+  const entregador=JSON.parse(localStorage.getItem('entregador')||'null');
+  if(perfilSolicitado==='cliente'&&cliente?.token)return{tipo:'cliente',token:cliente.token,nome:cliente.nome||cliente.email,voltar:'/'};
+  if(perfilSolicitado==='loja'&&tokenLoja)return{tipo:'loja',token:tokenLoja,nome:loja?.nome||loja?.email,voltar:'/loja/'};
+  if(perfilSolicitado==='entregador'&&tokenEntregador)return{tipo:'entregador',token:tokenEntregador,nome:entregador?.nome||entregador?.email,voltar:'/entregador/'};
+  if(cliente?.token)return{tipo:'cliente',token:cliente.token,nome:cliente.nome||cliente.email,voltar:'/'};
+  if(tokenLoja)return{tipo:'loja',token:tokenLoja,nome:loja?.nome||loja?.email,voltar:'/loja/'};
+  if(tokenEntregador)return{tipo:'entregador',token:tokenEntregador,nome:entregador?.nome||entregador?.email,voltar:'/entregador/'};
+  return null;
+}
+
+async function api(caminho,opcoes={}){
+  const resposta=await fetch(caminho,{...opcoes,headers:{'Content-Type':'application/json','Authorization':'Bearer '+sessao.token,...(opcoes.headers||{})}});
+  const dados=await resposta.json().catch(()=>({error:'Resposta inválida do servidor'}));
+  if(!resposta.ok)throw new Error(dados.error||'Não foi possível concluir');
+  return dados;
+}
+
+async function baixarMeusDados(){
+  const status=document.getElementById('exportacao-status');status.textContent='Preparando arquivo...';
+  try{
+    const dados=await api('/api/privacidade/exportar');
+    const blob=new Blob([JSON.stringify(dados,null,2)],{type:'application/json'});
+    const url=URL.createObjectURL(blob);const link=document.createElement('a');
+    link.href=url;link.download=`obraexpress-meus-dados-${new Date().toISOString().slice(0,10)}.json`;
+    document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(url);
+    status.textContent='✅ Arquivo gerado. Guarde-o em local privado.';
+  }catch(erro){status.textContent='⚠️ '+erro.message;}
+}
+
+async function enviarSolicitacao(){
+  const status=document.getElementById('envio-status');status.textContent='Enviando...';
+  try{
+    const resposta=await api('/api/privacidade/solicitacoes',{method:'POST',body:JSON.stringify({tipo:document.getElementById('tipo').value,descricao:document.getElementById('descricao').value})});
+    status.textContent=`✅ Protocolo #${resposta.id} registrado.`;document.getElementById('descricao').value='';await carregarSolicitacoes();
+  }catch(erro){status.textContent='⚠️ '+erro.message;}
+}
+
+async function carregarSolicitacoes(){
+  const lista=document.getElementById('lista-solicitacoes');
+  try{
+    const resposta=await api('/api/privacidade/solicitacoes');
+    lista.innerHTML=(resposta.solicitacoes||[]).map(item=>`<div class="item"><span class="tag">#${Number(item.id)} · ${h(item.status)}</span><strong style="display:block;margin-top:7px">${h(item.tipo.replaceAll('_',' '))}</strong><div>${h(item.descricao||'Sem descrição adicional')}</div>${item.resposta_admin?`<div class="meta"><strong>Resposta:</strong> ${h(item.resposta_admin)}</div>`:''}<div class="meta">Criada em ${new Date(item.criada_em).toLocaleString('pt-BR')}</div></div>`).join('')||'<div class="vazio">Você ainda não abriu nenhuma solicitação.</div>';
+  }catch(erro){lista.innerHTML='<div class="vazio">⚠️ '+h(erro.message)+'</div>';}
+}
+
+async function carregarVerificacao(){
+  if(!['loja','entregador'].includes(sessao.tipo))return;
+  document.getElementById('identidade-card').classList.remove('oculto');
+  try{const r=await api('/api/privacidade/verificacao-identidade');document.getElementById('identidade-status').textContent=r.aviso;}
+  catch(erro){document.getElementById('identidade-status').textContent=erro.message;}
+}
+
+sessao=descobrirSessao();
+if(!sessao){document.getElementById('sem-sessao').classList.remove('oculto');}
+else{
+  document.getElementById('conteudo').classList.remove('oculto');
+  document.getElementById('identidade').textContent=`${sessao.nome||'Usuário'} — conta de ${sessao.tipo}`;
+  document.getElementById('voltar-painel').href=sessao.voltar;
+  carregarSolicitacoes();carregarVerificacao();
+}
+</script>
+</body>
+</html>

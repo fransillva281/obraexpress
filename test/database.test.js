@@ -7,6 +7,33 @@ const { buildRunSql, isUniqueViolation, toPostgresSql } = require('../database-u
 const { calcularFinanceiroPedido, calcularFretePorFaixa, calcularGanhoLiquidoEntregador, calcularPercentualPromocional, calcularTaxaPedidoPequeno, normalizarPlanoLoja } = require('../financial-utils');
 const { criarReferenciaPagamentoTeste, pagamentoExpirado } = require('../payment-utils');
 const { calcularJanelaOfertaEntrega } = require('../dispatch-utils');
+const { validarCPF, validarCNPJ } = require('../document-validator');
+
+test('valida os dígitos verificadores de CPF e CNPJ', () => {
+  assert.equal(validarCPF('529.982.247-25'), true);
+  assert.equal(validarCPF('529.982.247-24'), false);
+  assert.equal(validarCPF('111.111.111-11'), false);
+  assert.equal(validarCNPJ('11.222.333/0001-81'), true);
+  assert.equal(validarCNPJ('11.222.333/0001-82'), false);
+  assert.equal(validarCNPJ('00.000.000/0000-00'), false);
+});
+
+test('central de privacidade protege direitos e bloqueia biometria sem provedor', () => {
+  const raiz = path.join(__dirname, '..');
+  const schema = fs.readFileSync(path.join(raiz, 'db', 'schema.sql'), 'utf8');
+  const servidor = fs.readFileSync(path.join(raiz, 'server.js'), 'utf8');
+  const central = fs.readFileSync(path.join(raiz, 'frontend', 'privacidade.html'), 'utf8');
+  const admin = fs.readFileSync(path.join(raiz, 'admin', 'index.html'), 'utf8');
+  assert.match(schema, /CREATE TABLE IF NOT EXISTS solicitacoes_privacidade/);
+  assert.match(schema, /CREATE TABLE IF NOT EXISTS verificacoes_identidade/);
+  assert.match(servidor, /\/api\/privacidade\/exportar/);
+  assert.match(servidor, /\/api\/privacidade\/solicitacoes/);
+  assert.match(servidor, /coleta_biometrica_ativa: false/);
+  assert.match(central, /Baixar uma cópia dos meus dados/);
+  assert.match(central, /não permite enviar CNH, selfie ou biometria/i);
+  assert.match(admin, /Solicitações dos titulares/);
+  assert.match(admin, /Documentos e reconhecimento facial/);
+});
 
 test('converte placeholders para o formato do PostgreSQL', () => {
   assert.equal(
@@ -294,7 +321,7 @@ test('PWA usa cache v11 e ícones que realmente existem', () => {
   const raiz = path.join(__dirname, '..');
   const sw = fs.readFileSync(path.join(raiz, 'frontend', 'sw.js'), 'utf8');
   const manifest = JSON.parse(fs.readFileSync(path.join(raiz, 'frontend', 'manifest.json'), 'utf8'));
-  assert.match(sw, /obraexpress-v11-3-distribuicao-entregas/);
+  assert.match(sw, /obraexpress-v11-4-privacidade-seguranca/);
   for (const icon of manifest.icons) {
     assert.equal(fs.existsSync(path.join(raiz, 'frontend', icon.src.replace(/^\//, ''))), true, `ícone ausente: ${icon.src}`);
   }

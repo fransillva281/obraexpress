@@ -1,5 +1,5 @@
-const CACHE = 'obraexpress-v11-3-distribuicao-entregas';
-const urls = ['/', '/loja/', '/entregador/', '/admin/', '/termos.html', '/manifest.json'];
+const CACHE = 'obraexpress-v11-4-privacidade-seguranca';
+const urls = ['/', '/loja/', '/entregador/', '/admin/', '/termos.html', '/privacidade.html', '/manifest.json'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(urls)));

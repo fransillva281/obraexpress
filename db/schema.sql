@@ -205,6 +205,52 @@ CREATE UNIQUE INDEX IF NOT EXISTS aceite_termos_unico
 CREATE INDEX IF NOT EXISTS idx_aceites_usuario
   ON aceites_termos (tipo_usuario, usuario_id, aceito_em DESC);
 
+-- Central dos direitos do titular. A referência é polimórfica porque clientes,
+-- lojas e entregadores vivem em tabelas diferentes. Nenhuma senha, documento,
+-- fotografia ou dado biométrico é copiado para esta tabela.
+CREATE TABLE IF NOT EXISTS solicitacoes_privacidade (
+  id SERIAL PRIMARY KEY,
+  tipo_usuario TEXT NOT NULL CHECK (tipo_usuario IN ('cliente', 'loja', 'entregador')),
+  usuario_id INTEGER NOT NULL,
+  tipo TEXT NOT NULL CHECK (tipo IN (
+    'acesso', 'correcao', 'exclusao', 'revisao_decisao_automatizada',
+    'revogacao_consentimento', 'outro'
+  )),
+  descricao TEXT,
+  status TEXT NOT NULL DEFAULT 'recebida'
+    CHECK (status IN ('recebida', 'em_analise', 'concluida', 'recusada')),
+  resposta_admin TEXT,
+  criada_em TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  atualizada_em TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_solicitacoes_privacidade_titular
+  ON solicitacoes_privacidade (tipo_usuario, usuario_id, criada_em DESC);
+CREATE INDEX IF NOT EXISTS idx_solicitacoes_privacidade_status
+  ON solicitacoes_privacidade (status, criada_em ASC);
+
+-- Guarda apenas o resultado futuro de um provedor especializado. Fotos de
+-- documentos, selfies e moldes biométricos não devem ser gravados neste banco.
+CREATE TABLE IF NOT EXISTS verificacoes_identidade (
+  id SERIAL PRIMARY KEY,
+  tipo_usuario TEXT NOT NULL CHECK (tipo_usuario IN ('loja', 'entregador')),
+  usuario_id INTEGER NOT NULL,
+  provedor TEXT NOT NULL DEFAULT 'nao_configurado',
+  referencia_externa TEXT,
+  status TEXT NOT NULL DEFAULT 'nao_iniciada'
+    CHECK (status IN ('nao_iniciada', 'aguardando', 'aprovada', 'recusada', 'revisao_manual')),
+  resultado_codigo TEXT,
+  motivo TEXT,
+  criada_em TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  atualizada_em TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  verificada_em TIMESTAMPTZ,
+  UNIQUE (tipo_usuario, usuario_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS verificacoes_identidade_referencia_unica
+  ON verificacoes_identidade (provedor, referencia_externa)
+  WHERE referencia_externa IS NOT NULL;
+
 -- Cobranças do pedido. Nesta versão o provedor "mock" permite testar todo o
 -- fluxo sem movimentar dinheiro. A tabela já separa o pedido da cobrança para
 -- receber um provedor Pix real futuramente sem alterar o histórico dos pedidos.
