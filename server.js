@@ -279,6 +279,10 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", "'unsafe-inline'"],
+      // Compatibilidade temporaria com os botoes atuais, que ainda usam
+      // atributos onclick. Sem esta diretiva o Helmet acrescenta
+      // `script-src-attr 'none'` e toda a interface fica sem responder.
+      scriptSrcAttr: ["'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", 'data:', 'https:'],
       connectSrc: ["'self'"],

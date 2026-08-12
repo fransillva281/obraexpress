@@ -35,6 +35,13 @@ test('central de privacidade protege direitos e bloqueia biometria sem provedor'
   assert.match(admin, /Documentos e reconhecimento facial/);
 });
 
+test('politica de seguranca permite os cliques usados pelos paineis atuais', () => {
+  const servidor = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  const cliente = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'index.html'), 'utf8');
+  assert.match(cliente, /onclick=/);
+  assert.match(servidor, /scriptSrcAttr:\s*\["'unsafe-inline'"\]/);
+});
+
 test('converte placeholders para o formato do PostgreSQL', () => {
   assert.equal(
     toPostgresSql('SELECT * FROM pedidos WHERE cliente_id = ? AND status = ?'),
@@ -317,11 +324,11 @@ test('painéis mostram avisos, estoque real e rastreamento protegido', () => {
   assert.match(entregador, /status_cadastro==='aprovado'\)iniciarGPS/);
 });
 
-test('PWA usa cache v11 e ícones que realmente existem', () => {
+test('PWA usa cache corrigido e ícones que realmente existem', () => {
   const raiz = path.join(__dirname, '..');
   const sw = fs.readFileSync(path.join(raiz, 'frontend', 'sw.js'), 'utf8');
   const manifest = JSON.parse(fs.readFileSync(path.join(raiz, 'frontend', 'manifest.json'), 'utf8'));
-  assert.match(sw, /obraexpress-v11-4-privacidade-seguranca/);
+  assert.match(sw, /obraexpress-v11-4-1-corrige-cliques/);
   for (const icon of manifest.icons) {
     assert.equal(fs.existsSync(path.join(raiz, 'frontend', icon.src.replace(/^\//, ''))), true, `ícone ausente: ${icon.src}`);
   }

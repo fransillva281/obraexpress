@@ -1,4 +1,4 @@
-const CACHE = 'obraexpress-v11-4-privacidade-seguranca';
+const CACHE = 'obraexpress-v11-4-1-corrige-cliques';
 const urls = ['/', '/loja/', '/entregador/', '/admin/', '/termos.html', '/privacidade.html', '/manifest.json'];
 
 self.addEventListener('install', e => {
