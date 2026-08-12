@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS lojas (
   aberto INTEGER DEFAULT 1,
   plano TEXT DEFAULT 'entrega_obraexpress',
   comissao_percentual NUMERIC(5,2) DEFAULT 5.00,
+  sessao_versao INTEGER NOT NULL DEFAULT 1,
   inicio_promocao TIMESTAMPTZ,
   data_cadastro TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
@@ -62,6 +63,7 @@ CREATE TABLE IF NOT EXISTS clientes (
   longitude DOUBLE PRECISION,
   status_cadastro TEXT DEFAULT 'aprovado',
   status_motivo TEXT,
+  sessao_versao INTEGER NOT NULL DEFAULT 1,
   data_cadastro TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -87,9 +89,30 @@ CREATE TABLE IF NOT EXISTS entregadores (
   status_cadastro TEXT DEFAULT 'aprovado',
   status_motivo TEXT,
   comissao_percentual NUMERIC(5,2) DEFAULT 5.00,
+  sessao_versao INTEGER NOT NULL DEFAULT 1,
   inicio_promocao TIMESTAMPTZ,
   data_cadastro TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Códigos de recuperação nunca são armazenados em texto aberto. A coluna
+-- codigo_hash guarda somente um HMAC e cada código expira e só funciona uma vez.
+CREATE TABLE IF NOT EXISTS recuperacoes_senha (
+  id BIGSERIAL PRIMARY KEY,
+  tipo_usuario TEXT NOT NULL CHECK (tipo_usuario IN ('cliente', 'loja', 'entregador')),
+  usuario_id INTEGER NOT NULL,
+  codigo_hash TEXT NOT NULL,
+  tentativas INTEGER NOT NULL DEFAULT 0,
+  expira_em TIMESTAMPTZ NOT NULL,
+  usado_em TIMESTAMPTZ,
+  envio_id TEXT,
+  ip_hash TEXT,
+  criada_em TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_recuperacoes_senha_conta
+  ON recuperacoes_senha(tipo_usuario, usuario_id, criada_em DESC);
+CREATE INDEX IF NOT EXISTS idx_recuperacoes_senha_expiracao
+  ON recuperacoes_senha(expira_em);
 
 CREATE TABLE IF NOT EXISTS pedidos (
   id SERIAL PRIMARY KEY,
@@ -485,6 +508,10 @@ WHERE id = 1
   AND adicional_chuva_percentual = 15.00
   AND adicional_pico_percentual = 10.00
   AND limite_adicionais_percentual = 25.00;
+
+ALTER TABLE lojas ADD COLUMN IF NOT EXISTS sessao_versao INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE clientes ADD COLUMN IF NOT EXISTS sessao_versao INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE entregadores ADD COLUMN IF NOT EXISTS sessao_versao INTEGER NOT NULL DEFAULT 1;
 
 ALTER TABLE lojas ALTER COLUMN plano SET DEFAULT 'entrega_obraexpress';
 UPDATE lojas SET plano = 'entrega_obraexpress' WHERE plano IS NULL OR plano NOT IN ('loja', 'entrega_obraexpress');

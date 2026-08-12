@@ -8,6 +8,44 @@ const { calcularFinanceiroPedido, calcularFretePorFaixa, calcularGanhoLiquidoEnt
 const { criarReferenciaPagamentoTeste, pagamentoExpirado } = require('../payment-utils');
 const { calcularJanelaOfertaEntrega } = require('../dispatch-utils');
 const { validarCPF, validarCNPJ } = require('../document-validator');
+const {
+  gerarCodigoRecuperacao,
+  criarHashCodigo,
+  codigoFormatoValido,
+  normalizarTipoConta
+} = require('../password-reset-utils');
+
+test('recuperação de senha gera código temporário protegido', () => {
+  const codigo = gerarCodigoRecuperacao();
+  assert.match(codigo, /^\d{6}$/);
+  assert.equal(codigoFormatoValido(codigo), true);
+  assert.equal(codigoFormatoValido('12345'), false);
+  assert.equal(normalizarTipoConta('LOJA'), 'loja');
+  assert.equal(normalizarTipoConta('admin'), null);
+  const hash = criarHashCodigo({ tipo:'cliente', usuarioId:7, codigo, segredo:'segredo-de-teste' });
+  assert.equal(hash.length, 64);
+  assert.doesNotMatch(hash, new RegExp(codigo));
+});
+
+test('recuperação de senha existe nos três painéis e invalida sessões antigas', () => {
+  const raiz = path.join(__dirname, '..');
+  const schema = fs.readFileSync(path.join(raiz, 'db', 'schema.sql'), 'utf8');
+  const servidor = fs.readFileSync(path.join(raiz, 'server.js'), 'utf8');
+  assert.match(schema, /CREATE TABLE IF NOT EXISTS recuperacoes_senha/);
+  assert.match(schema, /sessao_versao INTEGER NOT NULL DEFAULT 1/);
+  assert.match(servidor, /\/api\/auth\/recuperacao-senha\/solicitar/);
+  assert.match(servidor, /\/api\/auth\/recuperacao-senha\/redefinir/);
+  assert.match(servidor, /sessao_versao = COALESCE\(sessao_versao, 1\) \+ 1/);
+  assert.match(servidor, /MENSAGEM_RECUPERACAO/);
+  assert.match(servidor, /DELETE FROM recuperacoes_senha/);
+  assert.match(servidor, /MAX_TENTATIVAS_CODIGO/);
+  for (const arquivo of ['frontend/index.html', 'loja/index.html', 'entregador/index.html']) {
+    const painel = fs.readFileSync(path.join(raiz, arquivo), 'utf8');
+    assert.match(painel, /Esqueci minha senha/);
+    assert.match(painel, /recuperacao-senha\/solicitar/);
+    assert.match(painel, /recuperacao-senha\/redefinir/);
+  }
+});
 
 test('valida os dígitos verificadores de CPF e CNPJ', () => {
   assert.equal(validarCPF('529.982.247-25'), true);
@@ -324,11 +362,11 @@ test('painéis mostram avisos, estoque real e rastreamento protegido', () => {
   assert.match(entregador, /status_cadastro==='aprovado'\)iniciarGPS/);
 });
 
-test('PWA usa cache corrigido e ícones que realmente existem', () => {
+test('PWA usa cache v11.5 e ícones que realmente existem', () => {
   const raiz = path.join(__dirname, '..');
   const sw = fs.readFileSync(path.join(raiz, 'frontend', 'sw.js'), 'utf8');
   const manifest = JSON.parse(fs.readFileSync(path.join(raiz, 'frontend', 'manifest.json'), 'utf8'));
-  assert.match(sw, /obraexpress-v11-4-1-corrige-cliques/);
+  assert.match(sw, /obraexpress-v11-5-recuperacao-senha/);
   for (const icon of manifest.icons) {
     assert.equal(fs.existsSync(path.join(raiz, 'frontend', icon.src.replace(/^\//, ''))), true, `ícone ausente: ${icon.src}`);
   }

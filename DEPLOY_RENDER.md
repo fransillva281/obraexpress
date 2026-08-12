@@ -29,9 +29,17 @@ com uma mensagem clara para impedir gravações temporárias.
 9. Crie `PUBLIC_URL` com `https://obraexpress-1.onrender.com`.
 10. Crie `CORS_ORIGINS` com `https://obraexpress-1.onrender.com`. Quando houver domínio próprio, acrescente-o separado por vírgula.
 11. Crie `TRUST_PROXY` com o valor `1`.
-12. Use `npm ci` como **Build Command**.
-13. Use `npm start` como **Start Command**.
-14. Salve escolhendo a opção que também inicia um novo deploy.
+12. Para ativar **Esqueci minha senha**, crie também:
+   - `RESEND_API_KEY`: chave secreta de envio criada no painel da Resend;
+   - `EMAIL_FROM`: remetente de um domínio verificado, por exemplo `ObraExpress <nao-responda@seudominio.com>`.
+13. Use `npm ci` como **Build Command**.
+14. Use `npm start` como **Start Command**.
+15. Salve escolhendo a opção que também inicia um novo deploy.
+
+Nunca coloque `RESEND_API_KEY` no GitHub, em arquivo `.env` enviado ao repositório
+ou em captura de tela. Sem essas duas variáveis, o restante do sistema continua
+funcionando e o painel administrativo mostra que a recuperação de senha aguarda
+configuração.
 
 ## 3. Confirmar nos logs
 
@@ -67,6 +75,8 @@ Se o login continuar funcionando, o cadastro permaneceu no PostgreSQL.
   incompleta e os Termos não tiverem sido revisados por profissional jurídico.
 - Não coloque chave de provedor financeiro no GitHub. A versão atual usa apenas
   `PAYMENT_MODE=mock`; o QR Code gerado é uma demonstração que não pode receber dinheiro.
+- O código de recuperação vale por 10 minutos, só funciona uma vez e é bloqueado
+  depois de cinco tentativas incorretas. Trocar a senha encerra as sessões antigas.
 - Mantenha `PAYMENT_MODE=mock` até a homologação empresarial, financeira e jurídica. Alterar essa variável sozinho não ativa Pix real.
 - Para serviços no mesmo Render e na mesma região, prefira a Internal Database
   URL, conforme a documentação oficial do Render.

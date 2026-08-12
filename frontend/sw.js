@@ -1,4 +1,4 @@
-const CACHE = 'obraexpress-v11-4-1-corrige-cliques';
+const CACHE = 'obraexpress-v11-5-recuperacao-senha';
 const urls = ['/', '/loja/', '/entregador/', '/admin/', '/termos.html', '/privacidade.html', '/manifest.json'];
 
 self.addEventListener('install', e => {

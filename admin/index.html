@@ -218,6 +218,10 @@ body{background:var(--bg);color:var(--texto)}
     <!-- Aba Operação -->
     <div id="aba-operacao" style="display:none">
       <div class="card">
+        <h3>🩺 Saúde dos serviços</h3>
+        <div id="status-servicos">Carregando...</div>
+      </div>
+      <div class="card">
         <h3>↩️ Cancelamentos e reembolsos</h3>
         <p class="info">Esta versão registra e testa o fluxo. Dinheiro real só será processado depois da integração com um provedor homologado.</p>
         <div id="lista-reembolsos"></div>
@@ -541,9 +545,16 @@ async function atualizarSaque(id, status) {
 }
 
 async function carregarOperacao() {
-  const [rr, rs, re, ra, rc] = await Promise.all([
-    api('/api/admin/reembolsos'), api('/api/admin/saques'), api('/api/admin/estoque-baixo'), api('/api/admin/auditoria'), api('/api/admin/cidades')
+  const [rr, rs, re, ra, rc, statusServicos] = await Promise.all([
+    api('/api/admin/reembolsos'), api('/api/admin/saques'), api('/api/admin/estoque-baixo'), api('/api/admin/auditoria'), api('/api/admin/cidades'), api('/api/admin/operacao/status-servicos')
   ]);
+  if (!statusServicos.error) {
+    document.getElementById('status-servicos').innerHTML = `
+      <div class="pedido-item">${statusServicos.banco?.conectado ? '✅' : '❌'} <strong>Banco PostgreSQL:</strong> ${statusServicos.banco?.conectado ? 'conectado' : 'indisponível'}</div>
+      <div class="pedido-item">${statusServicos.recuperacao_senha?.ativa ? '✅' : '⚠️'} <strong>Recuperação de senha por e-mail:</strong> ${statusServicos.recuperacao_senha?.ativa ? 'ativa' : 'aguardando RESEND_API_KEY e EMAIL_FROM no Render'}<div class="info">Código válido por ${Number(statusServicos.recuperacao_senha?.codigo_validade_minutos || 10)} minutos.</div></div>
+      <div class="pedido-item">⚠️ <strong>Pix real:</strong> ainda não ativado</div>
+      <div class="pedido-item">🔒 <strong>Documentos e biometria:</strong> coleta bloqueada</div>`;
+  }
   document.getElementById('lista-reembolsos').innerHTML = (rr.reembolsos || []).map(item => `
     <div class="pedido-item"><div class="flex"><strong>Pedido #${Number(item.pedido_id)}</strong><span class="tag">${h(item.status)}</span></div>
     <div class="info">${h(item.cliente_nome)} • ${h(item.loja_nome)} • R$ ${Number(item.valor || 0).toFixed(2)} • ${h(item.motivo)}</div>

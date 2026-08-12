@@ -347,6 +347,7 @@ body{background:linear-gradient(180deg,#F7FAFB 0%,var(--bg) 45%);color:var(--tex
         <input type="password" id="login-senha" placeholder="Sua senha">
       </div>
       <button class="btn btn-primary" onclick="loginCliente()">Entrar</button>
+      <button type="button" class="btn btn-secondary" onclick="showRecuperacaoSenhaCliente()" style="margin-top:8px">🔑 Esqueci minha senha</button>
       <a class="btn btn-secondary" href="/termos.html?perfil=cliente" target="_blank" rel="noopener" style="margin-top:8px">📜 Ler Termos e Regras</a>
       <div class="auth-toggle" style="text-align:center;margin-top:12px;font-size:14px;color:var(--texto-sec)">Não tem conta? <a onclick="showCadastro()" style="color:var(--laranja);font-weight:600;cursor:pointer">Cadastre-se</a></div>
     </div>
@@ -391,6 +392,18 @@ body{background:linear-gradient(180deg,#F7FAFB 0%,var(--bg) 45%);color:var(--tex
       <label class="legal-check"><input type="checkbox" id="cad-aceite-privacidade"> <span>Li a <a href="/termos.html?perfil=cliente#privacidade" target="_blank" rel="noopener">Política de Privacidade</a> e entendi como meus dados e o GPS são usados.</span></label>
       <button class="btn btn-primary" onclick="cadastroCliente()">Criar conta</button>
       <div class="auth-toggle" style="text-align:center;margin-top:12px;font-size:14px;color:var(--texto-sec)">Já tem conta? <a onclick="showLogin()" style="color:var(--laranja);font-weight:600;cursor:pointer">Entrar</a></div>
+    </div>
+    <div id="recuperacao-form" style="display:none">
+      <p style="color:var(--texto-sec);margin-bottom:14px">Informe o e-mail da sua conta. Enviaremos um código de 6 números válido por 10 minutos.</p>
+      <div class="form-group"><label>Email</label><input type="email" id="rec-email" placeholder="seu@email.com"></div>
+      <button type="button" class="btn btn-primary" onclick="solicitarCodigoCliente()">Enviar código</button>
+      <div id="rec-codigo-area" style="display:none;margin-top:14px">
+        <div class="form-group"><label>Código recebido</label><input type="text" id="rec-codigo" inputmode="numeric" maxlength="6" placeholder="000000"></div>
+        <div class="form-group"><label>Nova senha</label><input type="password" id="rec-nova-senha" minlength="8" maxlength="128" placeholder="Mínimo 8 caracteres"></div>
+        <div class="form-group"><label>Confirmar nova senha</label><input type="password" id="rec-confirmar-senha" minlength="8" maxlength="128" placeholder="Digite novamente"></div>
+        <button type="button" class="btn btn-primary" onclick="redefinirSenhaCliente()">Salvar nova senha</button>
+      </div>
+      <div class="auth-toggle" style="text-align:center;margin-top:14px"><a onclick="showLogin()" style="color:var(--laranja);font-weight:700;cursor:pointer">← Voltar para entrar</a></div>
     </div>
   </div>
 </div>
@@ -1311,13 +1324,46 @@ function updateAuthUI() {
 function showCadastro() {
   document.getElementById('login-form').style.display = 'none';
   document.getElementById('cadastro-form').style.display = 'block';
+  document.getElementById('recuperacao-form').style.display = 'none';
   document.getElementById('auth-title').textContent = 'Cadastro';
 }
 
 function showLogin() {
   document.getElementById('login-form').style.display = 'block';
   document.getElementById('cadastro-form').style.display = 'none';
+  document.getElementById('recuperacao-form').style.display = 'none';
   document.getElementById('auth-title').textContent = 'Entrar';
+}
+
+function showRecuperacaoSenhaCliente() {
+  document.getElementById('login-form').style.display = 'none';
+  document.getElementById('cadastro-form').style.display = 'none';
+  document.getElementById('recuperacao-form').style.display = 'block';
+  document.getElementById('auth-title').textContent = 'Recuperar senha';
+  document.getElementById('rec-email').value = document.getElementById('login-email').value;
+}
+
+async function solicitarCodigoCliente() {
+  const email = document.getElementById('rec-email').value.trim();
+  if (!email) return toast('Informe seu e-mail');
+  const r = await api('/api/auth/recuperacao-senha/solicitar', {method:'POST', body:JSON.stringify({tipo_usuario:'cliente', email})});
+  if (r.error) return toast(r.error);
+  document.getElementById('rec-codigo-area').style.display = 'block';
+  toast(r.message || 'Confira seu e-mail');
+}
+
+async function redefinirSenhaCliente() {
+  const email = document.getElementById('rec-email').value.trim();
+  const codigo = document.getElementById('rec-codigo').value.trim();
+  const nova_senha = document.getElementById('rec-nova-senha').value;
+  const confirmar = document.getElementById('rec-confirmar-senha').value;
+  if (nova_senha !== confirmar) return toast('As senhas não são iguais');
+  const r = await api('/api/auth/recuperacao-senha/redefinir', {method:'POST', body:JSON.stringify({tipo_usuario:'cliente', email, codigo, nova_senha})});
+  if (r.error) return toast(r.error);
+  document.getElementById('login-email').value = email;
+  document.getElementById('login-senha').value = '';
+  showLogin();
+  toast('Senha redefinida. Entre com a nova senha.');
 }
 
 async function loginCliente() {

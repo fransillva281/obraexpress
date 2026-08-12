@@ -32,6 +32,16 @@ const {
 } = require('./payment-utils');
 const { calcularJanelaOfertaEntrega } = require('./dispatch-utils');
 const { apenasDigitos, validarCPF, validarCNPJ } = require('./document-validator');
+const {
+  VALIDADE_CODIGO_MINUTOS,
+  MAX_TENTATIVAS_CODIGO,
+  normalizarTipoConta,
+  normalizarEmail,
+  gerarCodigoRecuperacao,
+  criarHashCodigo,
+  codigoFormatoValido
+} = require('./password-reset-utils');
+const { emailRecuperacaoConfigurado, enviarCodigoRecuperacao } = require('./email-utils');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -72,6 +82,14 @@ function emailValido(email) {
 
 function senhaValida(senha) {
   return typeof senha === 'string' && senha.length >= 8 && senha.length <= 128;
+}
+
+function tabelaContaPorTipo(tipo) {
+  return { cliente: 'clientes', loja: 'lojas', entregador: 'entregadores' }[tipo] || null;
+}
+
+function criarTokenConta(conta, tipo) {
+  return jwt.sign({ id: conta.id, tipo, sv: Number(conta.sessao_versao || 1) }, JWT_SECRET, { expiresIn: '7d' });
 }
 
 function cepValido(cep) {
@@ -329,8 +347,16 @@ const loginLimiter = rateLimit({
   skipSuccessfulRequests: true,
   message: { error: 'Muitas tentativas de acesso. Aguarde 15 minutos.' }
 });
+const recuperacaoSenhaLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 8,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Muitas tentativas. Aguarde 15 minutos e tente novamente.' }
+});
 app.use('/api', apiLimiter);
 app.use(['/api/admin/login', '/api/clientes/login', '/api/lojas/login', '/api/entregadores/login'], loginLimiter);
+app.use(['/api/auth/recuperacao-senha/solicitar', '/api/auth/recuperacao-senha/redefinir'], recuperacaoSenhaLimiter);
 app.use(express.static(path.join(__dirname, 'frontend')));
 app.use('/loja', express.static(path.join(__dirname, 'loja')));
 app.use('/entregador', express.static(path.join(__dirname, 'entregador')));
@@ -367,9 +393,12 @@ async function autenticarUsuario(req, res, next, tipoEsperado) {
   try {
     req.usuario = jwt.verify(token, JWT_SECRET);
     if (req.usuario.tipo !== tipoEsperado) return res.status(403).json({ error: `Acesso apenas para ${tipoEsperado}` });
-    const tabelaConta = { cliente: 'clientes', loja: 'lojas', entregador: 'entregadores' }[req.usuario.tipo];
-    const situacao = tabelaConta ? await dbGet(`SELECT status_cadastro, status_motivo FROM ${tabelaConta} WHERE id = ?`, [req.usuario.id]) : null;
+    const tabelaConta = tabelaContaPorTipo(req.usuario.tipo);
+    const situacao = tabelaConta ? await dbGet(`SELECT status_cadastro, status_motivo, sessao_versao FROM ${tabelaConta} WHERE id = ?`, [req.usuario.id]) : null;
     if (!situacao) return res.status(404).json({ error: 'Conta não encontrada' });
+    if (Number(req.usuario.sv || 1) !== Number(situacao.sessao_versao || 1)) {
+      return res.status(401).json({ error: 'Sessão encerrada. Entre novamente com sua senha.' });
+    }
     if (situacao.status_cadastro === STATUS_CADASTRO.SUSPENSO) {
       return res.status(403).json({ error: 'Conta suspensa. Consulte o suporte.', motivo: situacao.status_motivo || null });
     }
@@ -409,13 +438,21 @@ function authAdmin(req, res, next) {
   } catch { res.status(401).json({ error: 'Token inválido' }); }
 }
 
-function authQualquer(req, res, next) {
+async function authQualquer(req, res, next) {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Token não fornecido' });
   try {
     req.usuario = jwt.verify(token, JWT_SECRET);
     if (!['cliente', 'loja', 'entregador', 'admin'].includes(req.usuario.tipo)) {
       return res.status(403).json({ error: 'Tipo de conta inválido' });
+    }
+    const tabelaConta = tabelaContaPorTipo(req.usuario.tipo);
+    if (tabelaConta) {
+      const conta = await dbGet(`SELECT sessao_versao FROM ${tabelaConta} WHERE id = ?`, [req.usuario.id]);
+      if (!conta) return res.status(404).json({ error: 'Conta não encontrada' });
+      if (Number(req.usuario.sv || 1) !== Number(conta.sessao_versao || 1)) {
+        return res.status(401).json({ error: 'Sessão encerrada. Entre novamente com sua senha.' });
+      }
     }
     next();
   } catch { res.status(401).json({ error: 'Token inválido' }); }
@@ -736,6 +773,107 @@ app.put('/api/notificacoes/lidas/todas', authQualquer, async (req, res) => {
   res.json({ success: true });
 });
 
+// ============ RECUPERAÇÃO SEGURA DE SENHA ============
+const MENSAGEM_RECUPERACAO = 'Se existir uma conta com esse e-mail, enviaremos um código válido por 10 minutos.';
+
+app.post('/api/auth/recuperacao-senha/solicitar', async (req, res) => {
+  const tipo = normalizarTipoConta(req.body.tipo_usuario);
+  const email = normalizarEmail(req.body.email);
+  if (!tipo) return res.status(400).json({ error: 'Escolha cliente, loja ou entregador' });
+  if (!emailValido(email)) return res.json({ success: true, message: MENSAGEM_RECUPERACAO, envio_disponivel: emailRecuperacaoConfigurado() });
+  if (!emailRecuperacaoConfigurado()) {
+    return res.status(503).json({
+      error: 'A recuperação por e-mail ainda não está configurada. Entre em contato com o suporte.',
+      envio_disponivel: false
+    });
+  }
+
+  const tabela = tabelaContaPorTipo(tipo);
+  const conta = await dbGet(`SELECT id, nome, email FROM ${tabela} WHERE email = ?`, [email]);
+  if (!conta) {
+    await new Promise(resolve => setTimeout(resolve, 120));
+    return res.json({ success: true, message: MENSAGEM_RECUPERACAO, envio_disponivel: true });
+  }
+
+  const codigo = gerarCodigoRecuperacao();
+  const codigoHash = criarHashCodigo({ tipo, usuarioId: conta.id, codigo, segredo: JWT_SECRET });
+  await dbRun(`UPDATE recuperacoes_senha SET usado_em = CURRENT_TIMESTAMP
+    WHERE tipo_usuario = ? AND usuario_id = ? AND usado_em IS NULL`, [tipo, conta.id]);
+  const registro = await dbRun(`INSERT INTO recuperacoes_senha
+    (tipo_usuario, usuario_id, codigo_hash, expira_em, ip_hash)
+    VALUES (?, ?, ?, CURRENT_TIMESTAMP + INTERVAL '10 minutes', ?)`,
+  [tipo, conta.id, codigoHash, hashIpRequisicao(req)]);
+
+  try {
+    const envio = await enviarCodigoRecuperacao({
+      email: conta.email,
+      nome: conta.nome,
+      codigo,
+      validadeMinutos: VALIDADE_CODIGO_MINUTOS,
+      idempotencyKey: `obraexpress-recuperacao-${registro.lastID}`
+    });
+    await dbRun('UPDATE recuperacoes_senha SET envio_id = ? WHERE id = ?', [envio.id, registro.lastID]);
+  } catch (error) {
+    await dbRun('UPDATE recuperacoes_senha SET usado_em = CURRENT_TIMESTAMP WHERE id = ?', [registro.lastID]);
+    console.error('Falha no envio do código de recuperação:', error.codigo || error.message);
+  }
+
+  res.json({ success: true, message: MENSAGEM_RECUPERACAO, envio_disponivel: true });
+});
+
+app.post('/api/auth/recuperacao-senha/redefinir', async (req, res) => {
+  const tipo = normalizarTipoConta(req.body.tipo_usuario);
+  const email = normalizarEmail(req.body.email);
+  const codigo = String(req.body.codigo || '').trim();
+  const novaSenha = req.body.nova_senha;
+  if (!tipo) return res.status(400).json({ error: 'Escolha cliente, loja ou entregador' });
+  if (!emailValido(email) || !codigoFormatoValido(codigo)) {
+    return res.status(400).json({ error: 'Código inválido ou expirado' });
+  }
+  if (!senhaValida(novaSenha)) {
+    return res.status(400).json({ error: 'A nova senha precisa ter entre 8 e 128 caracteres' });
+  }
+
+  const tabela = tabelaContaPorTipo(tipo);
+  const conta = await dbGet(`SELECT id FROM ${tabela} WHERE email = ?`, [email]);
+  if (!conta) return res.status(400).json({ error: 'Código inválido ou expirado' });
+
+  const recuperacao = await dbGet(`SELECT id, codigo_hash, tentativas FROM recuperacoes_senha
+    WHERE tipo_usuario = ? AND usuario_id = ? AND usado_em IS NULL
+      AND expira_em > CURRENT_TIMESTAMP AND tentativas < ?
+    ORDER BY criada_em DESC LIMIT 1`, [tipo, conta.id, MAX_TENTATIVAS_CODIGO]);
+  if (!recuperacao) return res.status(400).json({ error: 'Código inválido ou expirado' });
+
+  const recebidoHash = criarHashCodigo({ tipo, usuarioId: conta.id, codigo, segredo: JWT_SECRET });
+  const codigoCorreto = crypto.timingSafeEqual(Buffer.from(recebidoHash, 'hex'), Buffer.from(recuperacao.codigo_hash, 'hex'));
+  if (!codigoCorreto) {
+    await dbRun(`UPDATE recuperacoes_senha
+      SET tentativas = tentativas + 1,
+          usado_em = CASE WHEN tentativas + 1 >= ? THEN CURRENT_TIMESTAMP ELSE usado_em END
+      WHERE id = ?`, [MAX_TENTATIVAS_CODIGO, recuperacao.id]);
+    return res.status(400).json({ error: 'Código inválido ou expirado' });
+  }
+
+  const novaSenhaHash = bcrypt.hashSync(novaSenha, 10);
+  try {
+    await dbTransaction(async tx => {
+      const bloqueio = await tx.get(`SELECT id FROM recuperacoes_senha
+        WHERE id = ? AND usado_em IS NULL AND expira_em > CURRENT_TIMESTAMP
+          AND tentativas < ? FOR UPDATE`, [recuperacao.id, MAX_TENTATIVAS_CODIGO]);
+      if (!bloqueio) throw Object.assign(new Error('Código inválido ou expirado'), { status: 400 });
+      await tx.run(`UPDATE ${tabela} SET senha = ?, sessao_versao = COALESCE(sessao_versao, 1) + 1 WHERE id = ?`, [novaSenhaHash, conta.id]);
+      await tx.run(`UPDATE recuperacoes_senha SET usado_em = CURRENT_TIMESTAMP
+        WHERE tipo_usuario = ? AND usuario_id = ? AND usado_em IS NULL`, [tipo, conta.id]);
+    });
+  } catch (error) {
+    if (error.status === 400) return res.status(400).json({ error: 'Código inválido ou expirado' });
+    console.error('Falha ao redefinir senha:', error.message);
+    return res.status(500).json({ error: 'Não foi possível redefinir a senha' });
+  }
+
+  res.json({ success: true, message: 'Senha redefinida. Entre novamente usando a nova senha.' });
+});
+
 // ============ LOJAS API ============
 app.post('/api/lojas/cadastro', async (req, res) => {
   const { nome, cnpj, email, senha, telefone, endereco, bairro, cep, cidade, estado, latitude, longitude, descricao, categorias, taxa_entrega_km, chave_pix, plano, tempo_entrega_min, raio_entrega_km } = req.body;
@@ -769,7 +907,7 @@ app.post('/api/lojas/cadastro', async (req, res) => {
       await criarNotificacao(tx, { tipoUsuario: 'admin', titulo: 'Nova loja aguardando aprovação', mensagem: `${textoSeguro(nome, 160)} enviou um cadastro para análise.` });
       return insercao;
     });
-    const token = jwt.sign({ id: result.lastID, tipo: 'loja' }, JWT_SECRET, { expiresIn: '7d' });
+    const token = criarTokenConta({ id: result.lastID, sessao_versao: 1 }, 'loja');
     res.json({ success: true, id: result.lastID, token, termos_pendentes: false, status_cadastro: 'pendente', message: 'Cadastro enviado para aprovação.', loja: { id: result.lastID, nome, email, plano: planoEscolhido, comissao_percentual: 5, taxa_entrega_km: taxaKm, chave_pix: chave_pix || null, latitude: Number(latitude), longitude: Number(longitude), inicio_promocao: null, status_cadastro: 'pendente' } });
   } catch (e) {
     if (isUniqueViolation(e)) return res.status(400).json({ error: 'Email já cadastrado' });
@@ -787,7 +925,7 @@ app.post('/api/lojas/login', async (req, res) => {
   if (loja.status_cadastro === STATUS_CADASTRO.SUSPENSO) return res.status(403).json({ error: 'Conta suspensa. Consulte o suporte.', motivo: loja.status_motivo || null });
   loja.comissao_percentual = calcularPercentualPromocional(loja.inicio_promocao);
   await dbRun('UPDATE lojas SET comissao_percentual = ? WHERE id = ?', [loja.comissao_percentual, loja.id]);
-  const token = jwt.sign({ id: loja.id, tipo: 'loja' }, JWT_SECRET, { expiresIn: '7d' });
+  const token = criarTokenConta(loja, 'loja');
   res.json({ success: true, token, termos_pendentes: !(await possuiAceiteAtual('loja', loja.id)), status_cadastro: loja.status_cadastro, loja: { id: loja.id, nome: loja.nome, email: loja.email, logo: loja.logo, aberto: loja.aberto, taxa_entrega_km: loja.taxa_entrega_km, chave_pix: loja.chave_pix, plano: normalizarPlanoLoja(loja.plano), comissao_percentual: Number(loja.comissao_percentual), inicio_promocao: loja.inicio_promocao, latitude: loja.latitude, longitude: loja.longitude, cidade: loja.cidade, estado: loja.estado, cep: loja.cep, raio_entrega_km: loja.raio_entrega_km, status_cadastro: loja.status_cadastro, status_motivo: loja.status_motivo } });
 });
 
@@ -1000,7 +1138,7 @@ app.post('/api/clientes/cadastro', async (req, res) => {
       await registrarAceiteTermos('cliente', insercao.lastID, req, tx);
       return insercao;
     });
-    const token = jwt.sign({ id: result.lastID, tipo: 'cliente' }, JWT_SECRET, { expiresIn: '7d' });
+    const token = criarTokenConta({ id: result.lastID, sessao_versao: 1 }, 'cliente');
     res.json({ success: true, token, termos_pendentes: false, cliente: { id: result.lastID, nome, email, telefone, endereco_padrao, bairro, cep, cidade, estado, latitude: latitude || null, longitude: longitude || null } });
   } catch (e) {
     if (isUniqueViolation(e)) return res.status(400).json({ error: 'Email já cadastrado' });
@@ -1016,7 +1154,7 @@ app.post('/api/clientes/login', async (req, res) => {
   if (!cliente) return res.status(401).json({ error: 'Email não encontrado' });
   if (!bcrypt.compareSync(senha, cliente.senha)) return res.status(401).json({ error: 'Senha incorreta' });
   if (cliente.status_cadastro === STATUS_CADASTRO.SUSPENSO) return res.status(403).json({ error: 'Conta suspensa. Consulte o suporte.', motivo: cliente.status_motivo || null });
-  const token = jwt.sign({ id: cliente.id, tipo: 'cliente' }, JWT_SECRET, { expiresIn: '7d' });
+  const token = criarTokenConta(cliente, 'cliente');
   res.json({ success: true, token, termos_pendentes: !(await possuiAceiteAtual('cliente', cliente.id)), cliente: { id: cliente.id, nome: cliente.nome, email: cliente.email, telefone: cliente.telefone, endereco_padrao: cliente.endereco_padrao, bairro: cliente.bairro, cep: cliente.cep, cidade: cliente.cidade, estado: cliente.estado, latitude: cliente.latitude, longitude: cliente.longitude } });
 });
 
@@ -1081,7 +1219,7 @@ app.post('/api/entregadores/cadastro', async (req, res) => {
       await criarNotificacao(tx, { tipoUsuario: 'admin', titulo: 'Novo entregador aguardando aprovação', mensagem: `${textoSeguro(nome, 160)} enviou um cadastro para análise.` });
       return insercao;
     });
-    const token = jwt.sign({ id: result.lastID, tipo: 'entregador' }, JWT_SECRET, { expiresIn: '7d' });
+    const token = criarTokenConta({ id: result.lastID, sessao_versao: 1 }, 'entregador');
     res.json({ success: true, token, termos_pendentes: false, status_cadastro: 'pendente', message: 'Cadastro enviado para aprovação.', entregador: { id: result.lastID, nome, email, comissao_percentual: 5, inicio_promocao: null, disponivel: 0, cidade, estado, status_cadastro: 'pendente' } });
   } catch (e) {
     if (isUniqueViolation(e)) return res.status(400).json({ error: 'CPF ou email já cadastrado' });
@@ -1097,7 +1235,7 @@ app.post('/api/entregadores/login', async (req, res) => {
   if (!entregador) return res.status(401).json({ error: 'Email não encontrado' });
   if (!bcrypt.compareSync(senha, entregador.senha)) return res.status(401).json({ error: 'Senha incorreta' });
   if (entregador.status_cadastro === STATUS_CADASTRO.SUSPENSO) return res.status(403).json({ error: 'Conta suspensa. Consulte o suporte.', motivo: entregador.status_motivo || null });
-  const token = jwt.sign({ id: entregador.id, tipo: 'entregador' }, JWT_SECRET, { expiresIn: '7d' });
+  const token = criarTokenConta(entregador, 'entregador');
   const comissaoPercentual = calcularPercentualPromocional(entregador.inicio_promocao);
   await dbRun('UPDATE entregadores SET comissao_percentual = ? WHERE id = ?', [comissaoPercentual, entregador.id]);
   res.json({ success: true, token, termos_pendentes: !(await possuiAceiteAtual('entregador', entregador.id)), status_cadastro: entregador.status_cadastro, entregador: { id: entregador.id, nome: entregador.nome, email: entregador.email, veiculo: entregador.veiculo, disponivel: entregador.disponivel, chave_pix: entregador.chave_pix, comissao_percentual: comissaoPercentual, inicio_promocao: entregador.inicio_promocao, cep: entregador.cep, cidade: entregador.cidade, estado: entregador.estado, status_cadastro: entregador.status_cadastro, status_motivo: entregador.status_motivo } });
@@ -2036,6 +2174,21 @@ app.get('/api/admin/privacidade/resumo', authAdmin, async (req, res) => {
   });
 });
 
+app.get('/api/admin/operacao/status-servicos', authAdmin, async (req, res) => {
+  const banco = await getDatabaseHealth();
+  res.json({
+    banco: { conectado: Boolean(banco.connected), tipo: banco.database },
+    recuperacao_senha: {
+      ativa: emailRecuperacaoConfigurado(),
+      provedor: 'Resend',
+      codigo_validade_minutos: VALIDADE_CODIGO_MINUTOS,
+      tentativas_maximas: MAX_TENTATIVAS_CODIGO
+    },
+    pix_real: false,
+    biometria: false
+  });
+});
+
 app.get('/api/admin/privacidade/solicitacoes', authAdmin, async (req, res) => {
   const status = textoSeguro(req.query.status || '', 30);
   if (status && !STATUS_SOLICITACAO_PRIVACIDADE.has(status)) {
@@ -2213,6 +2366,7 @@ app.delete('/api/clientes/:id', authCliente, async (req, res) => {
         atualizada_em = CURRENT_TIMESTAMP WHERE tipo_usuario = 'cliente' AND usuario_id = ?`, [req.params.id]);
       await tx.run("DELETE FROM aceites_termos WHERE tipo_usuario = 'cliente' AND usuario_id = ?", [req.params.id]);
       await tx.run("DELETE FROM notificacoes WHERE tipo_usuario = 'cliente' AND usuario_id = ?", [req.params.id]);
+      await tx.run("DELETE FROM recuperacoes_senha WHERE tipo_usuario = 'cliente' AND usuario_id = ?", [req.params.id]);
       await tx.run('DELETE FROM avaliacoes WHERE cliente_id = ?', [req.params.id]);
       await tx.run(`UPDATE clientes SET nome = 'Cliente excluído', email = ?, senha = ?, telefone = NULL,
         endereco_padrao = NULL, bairro = NULL, cep = NULL, cidade = NULL, estado = NULL,
@@ -2237,6 +2391,7 @@ app.delete('/api/entregadores/:id', authEntregador, async (req, res) => {
         atualizada_em = CURRENT_TIMESTAMP WHERE tipo_usuario = 'entregador' AND usuario_id = ?`, [req.params.id]);
       await tx.run("DELETE FROM aceites_termos WHERE tipo_usuario = 'entregador' AND usuario_id = ?", [req.params.id]);
       await tx.run("DELETE FROM notificacoes WHERE tipo_usuario = 'entregador' AND usuario_id = ?", [req.params.id]);
+      await tx.run("DELETE FROM recuperacoes_senha WHERE tipo_usuario = 'entregador' AND usuario_id = ?", [req.params.id]);
       await tx.run('DELETE FROM avaliacoes WHERE entregador_id = ?', [req.params.id]);
       await tx.run(`UPDATE entregadores SET nome = 'Entregador excluído', cpf = NULL, email = ?, senha = ?, telefone = NULL,
         placa = NULL, cep = NULL, cidade = NULL, estado = NULL, foto = NULL, chave_pix = NULL,
@@ -2261,6 +2416,7 @@ app.delete('/api/lojas/:id', authLojas, async (req, res) => {
         atualizada_em = CURRENT_TIMESTAMP WHERE tipo_usuario = 'loja' AND usuario_id = ?`, [req.params.id]);
       await tx.run("DELETE FROM aceites_termos WHERE tipo_usuario = 'loja' AND usuario_id = ?", [req.params.id]);
       await tx.run("DELETE FROM notificacoes WHERE tipo_usuario = 'loja' AND usuario_id = ?", [req.params.id]);
+      await tx.run("DELETE FROM recuperacoes_senha WHERE tipo_usuario = 'loja' AND usuario_id = ?", [req.params.id]);
       await tx.run('UPDATE produtos SET ativo = 0 WHERE loja_id = ?', [req.params.id]);
       await tx.run(`UPDATE lojas SET nome = 'Loja excluída', cnpj = NULL, email = ?, senha = ?, telefone = NULL,
         whatsapp = NULL, chave_pix = NULL, logo = NULL, endereco = NULL, bairro = NULL, cep = NULL,
@@ -2280,7 +2436,7 @@ app.post('/api/admin/limpar-dados-teste', authAdmin, async (req, res) => {
     await dbTransaction(async tx => {
       for (const sql of [
         'DELETE FROM notificacoes', 'DELETE FROM auditoria_admin', 'DELETE FROM solicitacoes_privacidade',
-        'DELETE FROM verificacoes_identidade', 'DELETE FROM reembolsos',
+        'DELETE FROM verificacoes_identidade', 'DELETE FROM recuperacoes_senha', 'DELETE FROM reembolsos',
         'DELETE FROM reservas_estoque', 'DELETE FROM pagamentos', 'DELETE FROM saques',
         'DELETE FROM aceites_termos', 'DELETE FROM avaliacoes', 'DELETE FROM saldo_plataforma',
         'DELETE FROM movimentacoes_lojas', 'DELETE FROM saldo_lojas',

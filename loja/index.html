@@ -58,6 +58,7 @@ body{background:var(--bg);color:var(--texto)}
       <div class="form-group"><label>Email</label><input type="email" id="login-email" placeholder="loja@email.com"></div>
       <div class="form-group"><label>Senha</label><input type="password" id="login-senha" placeholder="Sua senha"></div>
       <button class="btn btn-primary" onclick="loginLoja()">Entrar</button>
+      <button type="button" class="btn" onclick="showRecuperacaoSenhaLoja()" style="border:2px solid var(--laranja);color:var(--laranja)">🔑 Esqueci minha senha</button>
       <a class="btn" href="/termos.html?perfil=loja" target="_blank" rel="noopener" style="border:2px solid var(--laranja);color:var(--laranja)">📜 Ler Termos e Regras</a>
       <div style="text-align:center;padding:16px;font-size:13px;color:var(--texto-sec)">Não tem conta? <a style="color:var(--laranja);font-weight:600;cursor:pointer" onclick="showCadastro()">Cadastre sua loja</a></div>
     </div>
@@ -83,6 +84,19 @@ body{background:var(--bg);color:var(--texto)}
       <label class="legal-check"><input type="checkbox" id="cad-aceite-privacidade"> <span>Li a <a href="/termos.html?perfil=loja#privacidade" target="_blank" rel="noopener">Política de Privacidade</a> e entendi como os dados são usados.</span></label>
       <button class="btn btn-primary" onclick="cadastroLoja()">Cadastrar Loja</button>
       <div style="text-align:center;padding:16px;font-size:13px;color:var(--texto-sec)">Já tem conta? <a style="color:var(--laranja);font-weight:600;cursor:pointer" onclick="showLogin()">Fazer login</a></div>
+    </div>
+    <div id="recuperacao-form" style="display:none">
+      <h2 style="color:var(--laranja);margin-bottom:8px">🔑 Recuperar senha</h2>
+      <p class="meta" style="margin-bottom:14px">Enviaremos um código de 6 números, válido por 10 minutos, para o e-mail cadastrado.</p>
+      <div class="form-group"><label>Email da loja</label><input type="email" id="rec-email" placeholder="loja@email.com"></div>
+      <button type="button" class="btn btn-primary" onclick="solicitarCodigoLoja()">Enviar código</button>
+      <div id="rec-codigo-area" style="display:none;margin-top:14px">
+        <div class="form-group"><label>Código recebido</label><input type="text" id="rec-codigo" inputmode="numeric" maxlength="6" placeholder="000000"></div>
+        <div class="form-group"><label>Nova senha</label><input type="password" id="rec-nova-senha" minlength="8" maxlength="128" placeholder="Mínimo 8 caracteres"></div>
+        <div class="form-group"><label>Confirmar nova senha</label><input type="password" id="rec-confirmar-senha" minlength="8" maxlength="128" placeholder="Digite novamente"></div>
+        <button type="button" class="btn btn-primary" onclick="redefinirSenhaLoja()">Salvar nova senha</button>
+      </div>
+      <button type="button" class="btn" onclick="showLogin()" style="margin-top:10px;border:2px solid var(--borda)">← Voltar para entrar</button>
     </div>
   </div>
 </div>
@@ -154,8 +168,30 @@ async function verificarAceiteLegalLoja(){
   return true;
 }
 
-function showCadastro(){document.getElementById('login-form').style.display='none';document.getElementById('cadastro-form').style.display='block';carregarCategoriasDisponiveis()}
-function showLogin(){document.getElementById('login-form').style.display='block';document.getElementById('cadastro-form').style.display='none'}
+function showCadastro(){document.getElementById('login-form').style.display='none';document.getElementById('cadastro-form').style.display='block';document.getElementById('recuperacao-form').style.display='none';carregarCategoriasDisponiveis()}
+function showLogin(){document.getElementById('login-form').style.display='block';document.getElementById('cadastro-form').style.display='none';document.getElementById('recuperacao-form').style.display='none'}
+function showRecuperacaoSenhaLoja(){document.getElementById('login-form').style.display='none';document.getElementById('cadastro-form').style.display='none';document.getElementById('recuperacao-form').style.display='block';document.getElementById('rec-email').value=document.getElementById('login-email').value}
+
+async function solicitarCodigoLoja(){
+  const email=document.getElementById('rec-email').value.trim();
+  if(!email)return toast('Informe o e-mail da loja');
+  const r=await api('/api/auth/recuperacao-senha/solicitar',{method:'POST',body:JSON.stringify({tipo_usuario:'loja',email})});
+  if(r.error)return toast(r.error);
+  document.getElementById('rec-codigo-area').style.display='block';
+  toast(r.message||'Confira seu e-mail');
+}
+
+async function redefinirSenhaLoja(){
+  const email=document.getElementById('rec-email').value.trim();
+  const codigo=document.getElementById('rec-codigo').value.trim();
+  const nova_senha=document.getElementById('rec-nova-senha').value;
+  if(nova_senha!==document.getElementById('rec-confirmar-senha').value)return toast('As senhas não são iguais');
+  const r=await api('/api/auth/recuperacao-senha/redefinir',{method:'POST',body:JSON.stringify({tipo_usuario:'loja',email,codigo,nova_senha})});
+  if(r.error)return toast(r.error);
+  localStorage.removeItem('loja_token');localStorage.removeItem('loja');token=null;loja=null;
+  document.getElementById('login-email').value=email;document.getElementById('login-senha').value='';showLogin();
+  toast('Senha redefinida. Entre com a nova senha.');
+}
 
 async function carregarCategoriasDisponiveis(){
   if(!categoriasDisponiveis.length){
