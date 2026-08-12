@@ -362,11 +362,11 @@ test('painéis mostram avisos, estoque real e rastreamento protegido', () => {
   assert.match(entregador, /status_cadastro==='aprovado'\)iniciarGPS/);
 });
 
-test('PWA usa cache v11.5 e ícones que realmente existem', () => {
+test('PWA usa cache v12 e ícones que realmente existem', () => {
   const raiz = path.join(__dirname, '..');
   const sw = fs.readFileSync(path.join(raiz, 'frontend', 'sw.js'), 'utf8');
   const manifest = JSON.parse(fs.readFileSync(path.join(raiz, 'frontend', 'manifest.json'), 'utf8'));
-  assert.match(sw, /obraexpress-v11-5-recuperacao-senha/);
+  assert.match(sw, /obraexpress-v12-preproducao-segura/);
   for (const icon of manifest.icons) {
     assert.equal(fs.existsSync(path.join(raiz, 'frontend', icon.src.replace(/^\//, ''))), true, `ícone ausente: ${icon.src}`);
   }

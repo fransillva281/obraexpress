@@ -1,4 +1,4 @@
-const CACHE = 'obraexpress-v11-5-recuperacao-senha';
+const CACHE = 'obraexpress-v12-preproducao-segura';
 const urls = ['/', '/loja/', '/entregador/', '/admin/', '/termos.html', '/privacidade.html', '/manifest.json'];
 
 self.addEventListener('install', e => {

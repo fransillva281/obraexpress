@@ -1,6 +1,6 @@
 {
   "name": "obraexpress-api",
-  "version": "1.0.0",
+  "version": "12.0.0",
   "description": "ObraExpress - Marketplace de Materiais de Construção",
   "license": "UNLICENSED",
   "main": "server.js",
@@ -10,7 +10,10 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "test": "node --test"
+    "check": "node --check server.js && node --check database.js && node --check production-readiness.js && node --check email-utils.js && node --check payment-utils.js",
+    "test": "node --test test/database.test.js test/production-readiness.test.js",
+    "test:integration": "node --test test/postgres.integration.test.js",
+    "ci": "npm run check && npm test && npm run test:integration"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

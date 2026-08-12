@@ -117,6 +117,10 @@ async function getDatabaseHealth() {
   };
 }
 
+async function closeDatabase() {
+  await pool.end();
+}
+
 const databaseReady = initializeDatabase();
 
 module.exports = {
@@ -125,6 +129,7 @@ module.exports = {
   dbGet,
   dbRun,
   dbTransaction,
+  closeDatabase,
   getDatabaseHealth,
   isUniqueViolation
 };

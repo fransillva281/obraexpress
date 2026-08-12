@@ -42,6 +42,7 @@ const {
   codigoFormatoValido
 } = require('./password-reset-utils');
 const { emailRecuperacaoConfigurado, enviarCodigoRecuperacao } = require('./email-utils');
+const { assertSafeRuntime, getProductionReadiness } = require('./production-readiness');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -59,6 +60,7 @@ const ADMIN_EMAIL = requireEnvironment('ADMIN_EMAIL');
 const ADMIN_PASSWORD = requireEnvironment('ADMIN_PASSWORD');
 // Esta versão aceita apenas o simulador. Nenhuma chave Pix real é usada.
 const PAYMENT_MODE = process.env.PAYMENT_MODE || 'mock';
+const RUNTIME_SAFETY = assertSafeRuntime(process.env);
 
 const TERMOS_VERSION = '2026-08-12.1';
 const PRIVACIDADE_VERSION = '2026-08-12.1';
@@ -380,7 +382,14 @@ app.use('/api', async (req, res, next) => {
 
 app.get('/api/health', async (req, res) => {
   try {
-    res.json(await getDatabaseHealth());
+    const banco = await getDatabaseHealth();
+    res.json({
+      ...banco,
+      app_stage: RUNTIME_SAFETY.stage,
+      payment_mode: RUNTIME_SAFETY.payment_mode,
+      moves_real_money: false,
+      version: '12.0.0-preproduction'
+    });
   } catch (error) {
     res.status(503).json({ status: 'error', database: 'postgresql' });
   }
@@ -436,6 +445,44 @@ function authAdmin(req, res, next) {
     if (req.usuario.tipo !== 'admin') return res.status(403).json({ error: 'Acesso apenas para admin' });
     next();
   } catch { res.status(401).json({ error: 'Token inválido' }); }
+}
+
+async function authLojaOuAdmin(req, res, next) {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).json({ error: 'Token não fornecido' });
+  try {
+    req.usuario = jwt.verify(token, JWT_SECRET);
+    if (req.usuario.tipo === 'admin') return next();
+    if (req.usuario.tipo !== 'loja') return res.status(403).json({ error: 'Acesso apenas para loja ou admin' });
+
+    const loja = await dbGet(`SELECT status_cadastro, status_motivo, sessao_versao
+      FROM lojas WHERE id = ?`, [req.usuario.id]);
+    if (!loja) return res.status(404).json({ error: 'Conta não encontrada' });
+    if (Number(req.usuario.sv || 1) !== Number(loja.sessao_versao || 1)) {
+      return res.status(401).json({ error: 'Sessão encerrada. Entre novamente com sua senha.' });
+    }
+    if (loja.status_cadastro !== STATUS_CADASTRO.APROVADO) {
+      return res.status(403).json({
+        error: loja.status_cadastro === STATUS_CADASTRO.SUSPENSO
+          ? 'Conta suspensa. Consulte o suporte.'
+          : 'Cadastro aguardando aprovação administrativa.',
+        codigo: 'CADASTRO_NAO_APROVADO',
+        status_cadastro: loja.status_cadastro,
+        motivo: loja.status_motivo || null
+      });
+    }
+    if (!(await possuiAceiteAtual('loja', req.usuario.id))) {
+      return res.status(428).json({
+        error: 'Leia e aceite os Termos e a Política de Privacidade para continuar',
+        codigo: 'TERMOS_PENDENTES',
+        termos_pendentes: true
+      });
+    }
+    next();
+  } catch (error) {
+    console.error('Falha de autenticação da operação de pedido:', error.message);
+    res.status(401).json({ error: 'Token inválido' });
+  }
 }
 
 async function authQualquer(req, res, next) {
@@ -2018,11 +2065,9 @@ app.put('/api/pedidos/:id/finalizar-loja', authLojas, exigirCadastroAprovado, as
 });
 
 // Loja responsável ou administrador atualiza o status do pedido.
-app.put('/api/pedidos/:id/status', async (req, res) => {
-  const token = req.headers.authorization?.split(' ')[1];
-  if (!token) return res.status(401).json({ error: 'Token não fornecido' });
+app.put('/api/pedidos/:id/status', authLojaOuAdmin, async (req, res) => {
   try {
-    const usuario = jwt.verify(token, JWT_SECRET);
+    const usuario = req.usuario;
     const { status, entregador_id } = req.body;
     const pedido = await dbGet('SELECT * FROM pedidos WHERE id = ?', [req.params.id]);
     if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado' });
@@ -2079,7 +2124,11 @@ app.put('/api/pedidos/:id/status', async (req, res) => {
         VALUES ('cliente', ?, 'Pedido aceito pela loja', ?, ?)`, [pedido.cliente_id, `A loja confirmou o pedido #${pedido.id}.`, pedido.id]);
     }
     res.json({ success: true });
-  } catch { res.status(401).json({ error: 'Token inválido' }); }
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    console.error('Erro ao atualizar status do pedido:', error);
+    res.status(500).json({ error: 'Não foi possível atualizar o pedido' });
+  }
 });
 
 // ============ AVALIAÇÕES ============
@@ -2176,6 +2225,7 @@ app.get('/api/admin/privacidade/resumo', authAdmin, async (req, res) => {
 
 app.get('/api/admin/operacao/status-servicos', authAdmin, async (req, res) => {
   const banco = await getDatabaseHealth();
+  const prontidao = getProductionReadiness(process.env);
   res.json({
     banco: { conectado: Boolean(banco.connected), tipo: banco.database },
     recuperacao_senha: {
@@ -2185,7 +2235,8 @@ app.get('/api/admin/operacao/status-servicos', authAdmin, async (req, res) => {
       tentativas_maximas: MAX_TENTATIVAS_CODIGO
     },
     pix_real: false,
-    biometria: false
+    biometria: false,
+    pre_producao: prontidao
   });
 });
 

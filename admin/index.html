@@ -553,7 +553,9 @@ async function carregarOperacao() {
       <div class="pedido-item">${statusServicos.banco?.conectado ? '✅' : '❌'} <strong>Banco PostgreSQL:</strong> ${statusServicos.banco?.conectado ? 'conectado' : 'indisponível'}</div>
       <div class="pedido-item">${statusServicos.recuperacao_senha?.ativa ? '✅' : '⚠️'} <strong>Recuperação de senha por e-mail:</strong> ${statusServicos.recuperacao_senha?.ativa ? 'ativa' : 'aguardando RESEND_API_KEY e EMAIL_FROM no Render'}<div class="info">Código válido por ${Number(statusServicos.recuperacao_senha?.codigo_validade_minutos || 10)} minutos.</div></div>
       <div class="pedido-item">⚠️ <strong>Pix real:</strong> ainda não ativado</div>
-      <div class="pedido-item">🔒 <strong>Documentos e biometria:</strong> coleta bloqueada</div>`;
+      <div class="pedido-item">🔒 <strong>Documentos e biometria:</strong> coleta bloqueada</div>
+      <div class="pedido-item">🧪 <strong>Ambiente:</strong> pré-produção sem movimentação de dinheiro real</div>
+      <div class="pedido-item">📋 <strong>Pendências antes do piloto real:</strong><div class="info">${(statusServicos.pre_producao?.pending || []).map(item => `• ${h(item)}`).join('<br>')}</div></div>`;
   }
   document.getElementById('lista-reembolsos').innerHTML = (rr.reembolsos || []).map(item => `
     <div class="pedido-item"><div class="flex"><strong>Pedido #${Number(item.pedido_id)}</strong><span class="tag">${h(item.status)}</span></div>
