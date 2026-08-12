@@ -30,6 +30,7 @@ const {
   criarReferenciaPagamentoTeste,
   pagamentoExpirado
 } = require('./payment-utils');
+const { calcularJanelaOfertaEntrega } = require('./dispatch-utils');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -177,6 +178,8 @@ async function obterConfiguracaoFrete() {
     limite_bonus_entregador_percentual: 15,
     raio_preferencial_coleta: 3,
     raio_maximo_coleta: 5,
+    raio_expansao_coleta: 8,
+    tempo_expansao_coleta_segundos: 30,
     fator_rota: 1.2,
     adicional_chuva_percentual: 10,
     adicional_pico_percentual: 5,
@@ -257,7 +260,11 @@ function calcularOfertaEntregador(pedido, entregador, configuracao) {
   return {
     ...ganho,
     coletaPreferencial: coletaEstimada <= Number(configuracao.raio_preferencial_coleta || 3),
-    coletaPermitida: coletaEstimada <= Number(configuracao.raio_maximo_coleta || 5),
+    coletaPermitida: coletaEstimada <= Math.max(
+      Number(configuracao.raio_preferencial_coleta || 3),
+      Number(configuracao.raio_maximo_coleta || 5),
+      Number(configuracao.raio_expansao_coleta || 8)
+    ),
     margemPlataformaEntrega: arredondarDinheiro(Number(pedido.taxa_entrega || 0) - ganho.valorLiquido)
   };
 }
@@ -1400,7 +1407,7 @@ app.put('/api/pedidos/:id/separar', authLojas, exigirCadastroAprovado, async (re
   if (pedido.tipo_entrega === 'entrega' && normalizarPlanoLoja(pedido.plano_loja) === 'entrega_obraexpress') {
     await dbRun(`INSERT INTO notificacoes (tipo_usuario, usuario_id, titulo, mensagem, pedido_id)
       SELECT 'entregador', id, 'Nova entrega disponível', ?, ? FROM entregadores
-      WHERE status_cadastro = 'aprovado' AND disponivel = 1`, [`Coleta do pedido #${pedido.id} disponível em ${pedido.distancia_km || 0} km.`, pedido.id]);
+      WHERE status_cadastro = 'aprovado'`, [`Coleta do pedido #${pedido.id} entrou na fila e está buscando entregadores próximos.`, pedido.id]);
   }
   res.json({ success: true, message: 'Pedido separado e disponível para entrega!' });
 });
@@ -1485,6 +1492,10 @@ app.get('/api/pedidos/disponiveis', authEntregador, exigirCadastroAprovado, asyn
   if (!coordenadaValida(entregador?.latitude, entregador?.longitude)) {
     return res.json({ pedidos: [], gps_pendente: true, mensagem: 'Aguardando uma localização GPS válida' });
   }
+  const entregaAtiva = await dbGet("SELECT id FROM pedidos WHERE entregador_id = ? AND status IN ('em_coleta', 'saiu_entrega') LIMIT 1", [req.usuario.id]);
+  if (entregaAtiva) {
+    return res.json({ pedidos: [], entrega_ativa: true, pedido_ativo_id: entregaAtiva.id, mensagem: 'Conclua sua entrega atual antes de aceitar outra.' });
+  }
   const configuracao = await obterConfiguracaoFrete();
   const pedidos = await dbAll(`SELECT p.*, l.nome as loja_nome, l.endereco as loja_endereco, 
     l.latitude as loja_latitude, l.longitude as loja_longitude, l.telefone as loja_telefone,
@@ -1497,19 +1508,38 @@ app.get('/api/pedidos/disponiveis', authEntregador, exigirCadastroAprovado, asyn
     WHERE p.status = 'separado' AND p.tipo_entrega = 'entrega'
       AND p.plano_loja = 'entrega_obraexpress' AND p.entregador_id IS NULL 
     ORDER BY p.data_pedido ASC`);
-  const ofertas = pedidos.map(pedido => {
+  const agora = new Date();
+  const candidatas = pedidos.map(pedido => {
     const oferta = calcularOfertaEntregador(pedido, entregador, configuracao);
+    const janela = calcularJanelaOfertaEntrega(pedido, oferta.distanciaColetaKm, configuracao, agora);
     return {
       ...pedido,
       valor_motoboy: oferta.valorLiquido,
       distancia_coleta_km: oferta.distanciaColetaKm,
       distancia_total_entrega_km: oferta.distanciaTotalKm,
       bonus_entregador_percentual: oferta.bonusPercentual,
-      coleta_preferencial: oferta.coletaPreferencial
+      coleta_preferencial: oferta.coletaPreferencial,
+      oferta_etapa: janela.etapa,
+      oferta_raio_atual_km: janela.raioAtual,
+      oferta_raio_final_km: janela.raioFinal,
+      proxima_expansao_em_segundos: janela.proximaExpansaoEmSegundos,
+      liberada_em_segundos: janela.liberadaEmSegundos,
+      disponivel_agora: janela.disponivelAgora
     };
-  }).filter(pedido => Number(pedido.distancia_coleta_km) <= Number(configuracao.raio_maximo_coleta || 5))
+  });
+  const ofertas = candidatas.filter(pedido => pedido.disponivel_agora)
     .sort((a, b) => Number(b.coleta_preferencial) - Number(a.coleta_preferencial) || Number(a.distancia_coleta_km) - Number(b.distancia_coleta_km));
-  res.json({ pedidos: ofertas, raio_maximo_coleta: Number(configuracao.raio_maximo_coleta || 5) });
+  const proximas = candidatas.map(pedido => pedido.liberada_em_segundos)
+    .filter(segundos => Number.isFinite(segundos) && segundos > 0);
+  const proximaOfertaEmSegundos = proximas.length ? Math.min(...proximas) : null;
+  res.json({
+    pedidos: ofertas,
+    aguardando_expansao: ofertas.length === 0 && proximaOfertaEmSegundos !== null,
+    proxima_oferta_em_segundos: proximaOfertaEmSegundos,
+    raio_inicial_coleta: Number(configuracao.raio_preferencial_coleta || 3),
+    raio_intermediario_coleta: Number(configuracao.raio_maximo_coleta || 5),
+    raio_final_coleta: Number(configuracao.raio_expansao_coleta || 8)
+  });
 });
 
 // ENTREGADOR: Aceitar pedido
@@ -1518,14 +1548,22 @@ app.put('/api/pedidos/:id/aceitar', authEntregador, exigirCadastroAprovado, asyn
     const configuracao = await obterConfiguracaoFrete();
     const resultado = await dbTransaction(async tx => {
       const entregador = await tx.get('SELECT id, latitude, longitude FROM entregadores WHERE id = ? FOR UPDATE', [req.usuario.id]);
+      const entregaAtiva = await tx.get("SELECT id FROM pedidos WHERE entregador_id = ? AND status IN ('em_coleta', 'saiu_entrega') LIMIT 1 FOR UPDATE", [req.usuario.id]);
+      if (entregaAtiva) {
+        throw Object.assign(new Error('Conclua sua entrega atual antes de aceitar outra.'), { status: 409 });
+      }
       const pedido = await tx.get(`SELECT p.*, l.latitude AS loja_latitude, l.longitude AS loja_longitude
         FROM pedidos p JOIN lojas l ON l.id = p.loja_id WHERE p.id = ? FOR UPDATE`, [req.params.id]);
       if (!pedido || pedido.status !== 'separado' || pedido.entregador_id || pedido.plano_loja !== 'entrega_obraexpress') {
         throw Object.assign(new Error('Essa entrega não está mais disponível'), { status: 409 });
       }
       const oferta = calcularOfertaEntregador(pedido, entregador, configuracao);
-      if (!oferta.coletaPermitida) {
-        throw Object.assign(new Error(`Você está além do raio de coleta de ${Number(configuracao.raio_maximo_coleta || 5)} km`), { status: 409 });
+      const janela = calcularJanelaOfertaEntrega(pedido, oferta.distanciaColetaKm, configuracao);
+      if (!janela.disponivelAgora) {
+        if (janela.liberadaEmSegundos === null) {
+          throw Object.assign(new Error(`Você está além do raio final de coleta de ${janela.raioFinal} km`), { status: 409 });
+        }
+        throw Object.assign(new Error(`Esta oferta chegará à sua região em aproximadamente ${janela.liberadaEmSegundos} segundos.`), { status: 409 });
       }
       await tx.run(`UPDATE pedidos SET entregador_id = ?, status = 'em_coleta',
         comissao_entrega_percentual = 0, valor_motoboy = ?, valor_plataforma = ?,
@@ -1899,6 +1937,8 @@ app.put('/api/admin/configuracoes-entrega', authAdmin, async (req, res) => {
     limite_bonus_entregador_percentual: [0, 100],
     raio_preferencial_coleta: [0, 30],
     raio_maximo_coleta: [0, 30],
+    raio_expansao_coleta: [0, 30],
+    tempo_expansao_coleta_segundos: [10, 300],
     fator_rota: [1, 3],
     adicional_chuva_percentual: [0, 100],
     adicional_pico_percentual: [0, 100],
@@ -1928,6 +1968,9 @@ app.put('/api/admin/configuracoes-entrega', authAdmin, async (req, res) => {
   }
   if (valorFinal('raio_maximo_coleta') < valorFinal('raio_preferencial_coleta')) {
     return res.status(400).json({ error: 'O raio máximo de coleta não pode ser menor que o raio preferencial' });
+  }
+  if (valorFinal('raio_expansao_coleta') < valorFinal('raio_maximo_coleta')) {
+    return res.status(400).json({ error: 'O raio final de coleta não pode ser menor que o raio máximo' });
   }
   if (req.body.condicao_climatica !== undefined) {
     if (!['normal', 'chuva', 'perigoso'].includes(req.body.condicao_climatica)) return res.status(400).json({ error: 'Condição climática inválida' });

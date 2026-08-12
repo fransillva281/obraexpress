@@ -162,6 +162,9 @@ body{background:var(--bg);color:var(--texto)}
         <div class="form-group"><label>Limite do bônus do entregador (%)</label><input type="number" id="cfg-bonus-entregador" min="0" step="1"></div>
         <div class="form-group"><label>Raio preferencial até a loja (km)</label><input type="number" id="cfg-raio-preferencial" min="0" step="0.5"></div>
         <div class="form-group"><label>Raio máximo até a loja (km)</label><input type="number" id="cfg-raio-maximo" min="0" step="0.5"></div>
+        <div class="form-group"><label>Raio final depois da expansão (km)</label><input type="number" id="cfg-raio-expansao" min="0" step="0.5"></div>
+        <div class="form-group"><label>Tempo de cada etapa da busca (segundos)</label><input type="number" id="cfg-tempo-expansao" min="10" max="300" step="5"></div>
+        <p class="info" style="margin-bottom:12px">A busca começa no raio preferencial, aumenta para o raio máximo após uma etapa e chega ao raio final após duas etapas. O primeiro entregador que aceitar fica com o pedido.</p>
         <div style="margin:16px 0 10px;border-top:1px solid var(--borda);padding-top:14px"><strong>🛒 Pedido mínimo e receita</strong></div>
         <div class="form-group"><label>Pedido mínimo em produtos (R$)</label><input type="number" id="cfg-pedido-minimo" min="0" step="0.01"></div>
         <div class="form-group"><label>Até qual valor é pedido pequeno (R$)</label><input type="number" id="cfg-limite-pedido-pequeno" min="0" step="0.01"></div>
@@ -407,6 +410,8 @@ async function carregarConfiguracoesEntrega(){
   document.getElementById('cfg-bonus-entregador').value=Number(c.limite_bonus_entregador_percentual);
   document.getElementById('cfg-raio-preferencial').value=Number(c.raio_preferencial_coleta);
   document.getElementById('cfg-raio-maximo').value=Number(c.raio_maximo_coleta);
+  document.getElementById('cfg-raio-expansao').value=Number(c.raio_expansao_coleta);
+  document.getElementById('cfg-tempo-expansao').value=Number(c.tempo_expansao_coleta_segundos);
   document.getElementById('cfg-pedido-minimo').value=Number(c.pedido_minimo);
   document.getElementById('cfg-limite-pedido-pequeno').value=Number(c.limite_pedido_pequeno);
   document.getElementById('cfg-taxa-pedido-pequeno').value=Number(c.taxa_pedido_pequeno);
@@ -431,6 +436,8 @@ async function salvarConfiguracoesEntrega(){
     limite_bonus_entregador_percentual:Number(document.getElementById('cfg-bonus-entregador').value),
     raio_preferencial_coleta:Number(document.getElementById('cfg-raio-preferencial').value),
     raio_maximo_coleta:Number(document.getElementById('cfg-raio-maximo').value),
+    raio_expansao_coleta:Number(document.getElementById('cfg-raio-expansao').value),
+    tempo_expansao_coleta_segundos:Number(document.getElementById('cfg-tempo-expansao').value),
     pedido_minimo:Number(document.getElementById('cfg-pedido-minimo').value),
     limite_pedido_pequeno:Number(document.getElementById('cfg-limite-pedido-pequeno').value),
     taxa_pedido_pequeno:Number(document.getElementById('cfg-taxa-pedido-pequeno').value),

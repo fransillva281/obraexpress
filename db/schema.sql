@@ -250,6 +250,8 @@ CREATE TABLE IF NOT EXISTS configuracoes_plataforma (
   limite_bonus_entregador_percentual NUMERIC(5,2) NOT NULL DEFAULT 15.00,
   raio_preferencial_coleta NUMERIC(6,2) NOT NULL DEFAULT 3.00,
   raio_maximo_coleta NUMERIC(6,2) NOT NULL DEFAULT 5.00,
+  raio_expansao_coleta NUMERIC(6,2) NOT NULL DEFAULT 8.00,
+  tempo_expansao_coleta_segundos INTEGER NOT NULL DEFAULT 30,
   fator_rota NUMERIC(5,2) NOT NULL DEFAULT 1.20,
   adicional_chuva_percentual NUMERIC(5,2) NOT NULL DEFAULT 10.00,
   adicional_pico_percentual NUMERIC(5,2) NOT NULL DEFAULT 5.00,
@@ -415,6 +417,8 @@ ALTER TABLE configuracoes_plataforma ADD COLUMN IF NOT EXISTS ganho_km_entregado
 ALTER TABLE configuracoes_plataforma ADD COLUMN IF NOT EXISTS limite_bonus_entregador_percentual NUMERIC(5,2) NOT NULL DEFAULT 15.00;
 ALTER TABLE configuracoes_plataforma ADD COLUMN IF NOT EXISTS raio_preferencial_coleta NUMERIC(6,2) NOT NULL DEFAULT 3.00;
 ALTER TABLE configuracoes_plataforma ADD COLUMN IF NOT EXISTS raio_maximo_coleta NUMERIC(6,2) NOT NULL DEFAULT 5.00;
+ALTER TABLE configuracoes_plataforma ADD COLUMN IF NOT EXISTS raio_expansao_coleta NUMERIC(6,2) NOT NULL DEFAULT 8.00;
+ALTER TABLE configuracoes_plataforma ADD COLUMN IF NOT EXISTS tempo_expansao_coleta_segundos INTEGER NOT NULL DEFAULT 30;
 
 UPDATE configuracoes_plataforma
 SET limite_adicionais_percentual = 10.00, atualizado_em = CURRENT_TIMESTAMP

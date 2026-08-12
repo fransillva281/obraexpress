@@ -6,6 +6,7 @@ const path = require('node:path');
 const { buildRunSql, isUniqueViolation, toPostgresSql } = require('../database-utils');
 const { calcularFinanceiroPedido, calcularFretePorFaixa, calcularGanhoLiquidoEntregador, calcularPercentualPromocional, calcularTaxaPedidoPequeno, normalizarPlanoLoja } = require('../financial-utils');
 const { criarReferenciaPagamentoTeste, pagamentoExpirado } = require('../payment-utils');
+const { calcularJanelaOfertaEntrega } = require('../dispatch-utils');
 
 test('converte placeholders para o formato do PostgreSQL', () => {
   assert.equal(
@@ -293,7 +294,7 @@ test('PWA usa cache v11 e ícones que realmente existem', () => {
   const raiz = path.join(__dirname, '..');
   const sw = fs.readFileSync(path.join(raiz, 'frontend', 'sw.js'), 'utf8');
   const manifest = JSON.parse(fs.readFileSync(path.join(raiz, 'frontend', 'manifest.json'), 'utf8'));
-  assert.match(sw, /obraexpress-v11-1-limpeza-testes/);
+  assert.match(sw, /obraexpress-v11-3-distribuicao-entregas/);
   for (const icon of manifest.icons) {
     assert.equal(fs.existsSync(path.join(raiz, 'frontend', icon.src.replace(/^\//, ''))), true, `ícone ausente: ${icon.src}`);
   }
@@ -308,4 +309,42 @@ test('limpeza de teste exige confirmação dupla e preserva configurações', ()
   assert.match(admin, /Apagar dados de teste/);
   assert.match(admin, /digite exatamente: LIMPAR TESTES/);
   assert.doesNotMatch(servidor.match(/app\.post\('\/api\/admin\/limpar-dados-teste'[\s\S]*?\n\}\);/)?.[0] || '', /DELETE FROM categorias|DELETE FROM configuracoes_plataforma/);
+});
+
+test('oferta de entrega expande de 3 para 5 e 8 km a cada 30 segundos', () => {
+  const configuracao = {
+    raio_preferencial_coleta: 3,
+    raio_maximo_coleta: 5,
+    raio_expansao_coleta: 8,
+    tempo_expansao_coleta_segundos: 30
+  };
+  const pedido = { data_separado: '2026-08-09T12:00:00.000Z' };
+  const inicio = new Date('2026-08-09T12:00:00.000Z');
+  const depois30 = new Date('2026-08-09T12:00:30.000Z');
+  const depois60 = new Date('2026-08-09T12:01:00.000Z');
+
+  assert.equal(calcularJanelaOfertaEntrega(pedido, 2, configuracao, inicio).disponivelAgora, true);
+  assert.equal(calcularJanelaOfertaEntrega(pedido, 4, configuracao, inicio).liberadaEmSegundos, 30);
+  assert.equal(calcularJanelaOfertaEntrega(pedido, 4, configuracao, depois30).etapa, 2);
+  assert.equal(calcularJanelaOfertaEntrega(pedido, 4, configuracao, depois30).disponivelAgora, true);
+  assert.equal(calcularJanelaOfertaEntrega(pedido, 7, configuracao, inicio).liberadaEmSegundos, 60);
+  assert.equal(calcularJanelaOfertaEntrega(pedido, 7, configuracao, depois60).etapa, 3);
+  assert.equal(calcularJanelaOfertaEntrega(pedido, 7, configuracao, depois60).disponivelAgora, true);
+  assert.equal(calcularJanelaOfertaEntrega(pedido, 9, configuracao, depois60).liberadaEmSegundos, null);
+});
+
+test('painel do entregador mostra temporizador e servidor protege o primeiro aceite', () => {
+  const raiz = path.join(__dirname, '..');
+  const servidor = fs.readFileSync(path.join(raiz, 'server.js'), 'utf8');
+  const entregador = fs.readFileSync(path.join(raiz, 'entregador', 'index.html'), 'utf8');
+  const admin = fs.readFileSync(path.join(raiz, 'admin', 'index.html'), 'utf8');
+  const schema = fs.readFileSync(path.join(raiz, 'db', 'schema.sql'), 'utf8');
+  assert.match(servidor, /calcularJanelaOfertaEntrega/);
+  assert.match(servidor, /WHERE p\.id = \? FOR UPDATE/);
+  assert.match(servidor, /Essa entrega não está mais disponível/);
+  assert.match(entregador, /data-oferta-segundos/);
+  assert.match(entregador, /Este pedido continuará disponível para você/);
+  assert.match(admin, /Raio final depois da expansão/);
+  assert.match(schema, /raio_expansao_coleta/);
+  assert.match(schema, /tempo_expansao_coleta_segundos/);
 });

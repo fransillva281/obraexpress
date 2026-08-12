@@ -40,6 +40,7 @@ body{background:var(--bg);color:var(--texto)}
 .order-item .actions button{flex:1;padding:10px;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer}
 .order-item .valor-entrega{font-size:24px;font-weight:800;color:var(--verde);text-align:center;margin:8px 0}
 .order-item .info-rotas{font-size:13px;color:var(--texto-sec);margin:8px 0;line-height:1.6}
+.finance-box{margin-top:8px;padding:10px;border:1px solid #FFE0B2;border-radius:9px;font-size:12px;line-height:1.55}
 .tabs{display:flex;background:var(--branco);margin:12px 16px;border-radius:12px;overflow:hidden}
 .tab{flex:1;padding:12px;text-align:center;font-size:13px;font-weight:600;cursor:pointer;border:none;background:none;color:var(--texto-sec)}
 .tab.active{background:var(--laranja);color:var(--branco)}
@@ -126,6 +127,7 @@ let gpsWatchId = null;
 let ultimaLocalizacao = null;
 let entregasConhecidas = null;
 let monitorEntregas = null;
+let contadorOfertas = null;
 let audioEntregador = null;
 let alertasEntregadorAtivos = localStorage.getItem('alertas_som_entregador') === '1';
 
@@ -295,7 +297,7 @@ async function iniciarMonitorEntregas(){
   if(monitorEntregas)clearInterval(monitorEntregas);
   entregasConhecidas=null;
   await carregarDisponiveis();
-  monitorEntregas=setInterval(carregarDisponiveis,15000);
+  monitorEntregas=setInterval(carregarDisponiveis,5000);
 }
 
 function switchTab(tab,btn){
@@ -345,10 +347,38 @@ async function carregarSaldo(){
 }
 
 // ============ PEDIDOS DISPONÍVEIS ============
+function textoContadorOferta(segundos){
+  const valor=Math.max(0,Math.ceil(Number(segundos)||0));
+  const minutos=Math.floor(valor/60);
+  const restante=valor%60;
+  return `${String(minutos).padStart(2,'0')}:${String(restante).padStart(2,'0')}`;
+}
+
+function iniciarContadorOfertas(){
+  if(contadorOfertas)clearInterval(contadorOfertas);
+  const elementos=[...document.querySelectorAll('[data-oferta-segundos]')];
+  if(!elementos.length){contadorOfertas=null;return;}
+  contadorOfertas=setInterval(()=>{
+    let precisaAtualizar=false;
+    elementos.forEach(el=>{
+      const segundos=Math.max(0,Number(el.dataset.ofertaSegundos||0)-1);
+      el.dataset.ofertaSegundos=String(segundos);
+      const relogio=el.querySelector('[data-relogio-oferta]');
+      if(relogio)relogio.textContent=textoContadorOferta(segundos);
+      if(segundos<=0)precisaAtualizar=true;
+    });
+    if(precisaAtualizar){
+      clearInterval(contadorOfertas);contadorOfertas=null;
+      carregarDisponiveis();
+    }
+  },1000);
+}
+
 async function carregarDisponiveis(){
   const el=document.getElementById('tab-disponiveis');
   const r=await api('/api/pedidos/disponiveis');
-  if(r.error)return;
+  if(contadorOfertas){clearInterval(contadorOfertas);contadorOfertas=null;}
+  if(r.error){el.innerHTML=`<div class="card">⚠️ ${escaparHtml(r.error)}</div>`;return;}
   const pedidos=r.pedidos||[];
   const idsAtuais=new Set(pedidos.map(p=>p.id));
   if(entregasConhecidas&&[...idsAtuais].some(id=>!entregasConhecidas.has(id))){
@@ -357,6 +387,20 @@ async function carregarDisponiveis(){
   entregasConhecidas=idsAtuais;
   const tab=document.getElementById('tab-disponiveis-entregador');
   if(tab)tab.textContent=`🆕 Disponíveis${pedidos.length?` (${pedidos.length})`:''}`;
+  if(r.gps_pendente){
+    el.innerHTML=`<div class="empty-state"><div class="icon" style="font-size:48px">📍</div><h3>GPS ainda não sincronizado</h3><p>Mantenha esta tela aberta e permita a localização do celular.</p></div>`;
+    return;
+  }
+  if(r.entrega_ativa){
+    el.innerHTML=`<div class="empty-state"><div class="icon" style="font-size:48px">🛵</div><h3>Você já possui uma entrega</h3><p>Conclua o pedido atual antes de aceitar outro.</p></div>`;
+    return;
+  }
+  if(r.aguardando_expansao){
+    const segundos=Math.max(1,Number(r.proxima_oferta_em_segundos||1));
+    el.innerHTML=`<div class="card" data-oferta-segundos="${segundos}" style="border:2px solid #FFB74D;text-align:center"><div style="font-size:42px">⏱️</div><h3>Uma entrega está ampliando a busca</h3><p class="meta">Ela chegará à sua região em aproximadamente <strong data-relogio-oferta>${textoContadorOferta(segundos)}</strong>.</p><p class="meta">Mantenha o GPS ativo. O pedido continuará disponível até alguém aceitar.</p></div>`;
+    iniciarContadorOfertas();
+    return;
+  }
   if(pedidos.length===0){
     el.innerHTML=`<div class="empty-state"><div class="icon" style="font-size:48px">🆕</div><h3>Nenhum pedido disponível</h3><p>Assim que uma loja liberar, aparece aqui</p></div>`;
     return;
@@ -369,6 +413,10 @@ async function carregarDisponiveis(){
       <h3 style="text-align:center;margin:8px 0">🏪 ${p.loja_nome}</h3>
       <div class="valor-entrega">💰 R$ ${(p.valor_motoboy||0).toFixed(2)}</div>
       <div class="meta" style="text-align:center">Valor líquido antes de aceitar${Number(p.bonus_entregador_percentual||0)>0?` • bônus ${Number(p.bonus_entregador_percentual).toFixed(0)}% incluído`:''}</div>
+      <div class="finance-box" style="text-align:center;background:#FFF8E1">
+        <strong>📡 Busca na etapa ${Number(p.oferta_etapa||1)} de 3 • raio atual ${Number(p.oferta_raio_atual_km||0).toFixed(1)} km</strong><br>
+        ${p.proxima_expansao_em_segundos!==null&&p.proxima_expansao_em_segundos!==undefined?`<span data-oferta-segundos="${Number(p.proxima_expansao_em_segundos)}">Mais entregadores serão chamados em <strong data-relogio-oferta>${textoContadorOferta(p.proxima_expansao_em_segundos)}</strong>. Este pedido continuará disponível para você.</span>`:'<span>Busca no raio final. O pedido fica disponível até alguém aceitar.</span>'}
+      </div>
       
       <div class="info-rotas">
         <strong>📍 Coleta:</strong> ${p.loja_endereco||'Não informado'}<br>
@@ -384,11 +432,12 @@ async function carregarDisponiveis(){
       </div>
     </div>
   `).join('');
+  iniciarContadorOfertas();
 }
 
 async function aceitarPedido(id){
   const r=await api('/api/pedidos/'+id+'/aceitar',{method:'PUT'});
-  if(r.error)return toast(r.error);
+  if(r.error){toast(r.error);carregarDisponiveis();return;}
   toast('✅ Pedido aceito! Vá até a loja.');
   carregarDisponiveis();
   carregarMinhasEntregas();
@@ -550,6 +599,7 @@ async function excluirMinhaConta(){
 
 function sair(){
   if(monitorEntregas){clearInterval(monitorEntregas);monitorEntregas=null;}
+  if(contadorOfertas){clearInterval(contadorOfertas);contadorOfertas=null;}
   pararGPS();
   localStorage.removeItem('entregador_token');
   localStorage.removeItem('entregador');
