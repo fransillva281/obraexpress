@@ -23,7 +23,7 @@ function criarReferenciaPagamentoTeste({ pedidoId, valor, agora = new Date(), no
     provedorPagamentoId: `mock_${pedidoId}_${identificador.toLowerCase()}`,
     idempotencyKey: `pedido_${pedidoId}_pix`,
     // Este texto não segue o padrão EMV do Pix e não pode gerar transferência real.
-    pixCopiaCola: `OBRAEXPRESS.TESTE|PEDIDO=${pedidoId}|VALOR=${valorNormalizado.toFixed(2)}|ID=${identificador}`,
+    pixCopiaCola: `OBRAMOBI.TESTE|PEDIDO=${pedidoId}|VALOR=${valorNormalizado.toFixed(2)}|ID=${identificador}`,
     expiraEm
   };
 }

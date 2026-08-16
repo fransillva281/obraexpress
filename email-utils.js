@@ -19,21 +19,21 @@ async function enviarCodigoRecuperacao({ email, nome, codigo, validadeMinutos, i
     headers: {
       Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
       'Content-Type': 'application/json',
-      'User-Agent': 'ObraExpress/1.0',
+      'User-Agent': 'ObraMobi/1.0',
       ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
     },
     body: JSON.stringify({
       from: remetente,
       to: [email],
-      subject: 'Código para redefinir sua senha — ObraExpress',
+      subject: 'Código para redefinir sua senha — ObraMobi',
       html: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#17202a">
-        <h1 style="color:#d94f00">ObraExpress</h1>
+        <h1 style="color:#d94f00">ObraMobi</h1>
         <p>Olá, ${escaparHtml(nome || 'usuário')}.</p>
         <p>Use o código abaixo para redefinir sua senha:</p>
         <div style="font-size:32px;font-weight:800;letter-spacing:8px;background:#fff3eb;padding:18px;text-align:center;border-radius:12px">${escaparHtml(codigo)}</div>
         <p>O código vale por <strong>${Number(validadeMinutos)} minutos</strong> e só pode ser usado uma vez.</p>
         <p>Se você não pediu essa alteração, ignore esta mensagem. Sua senha continua igual.</p>
-        <p style="font-size:12px;color:#667085">A ObraExpress nunca pede sua senha nem este código por WhatsApp.</p>
+        <p style="font-size:12px;color:#667085">A ObraMobi nunca pede sua senha nem este código por WhatsApp.</p>
       </div>`
     })
   });

@@ -144,7 +144,7 @@ test('painel administrativo trata sessão vencida e permite sair', () => {
   assert.match(admin, /Sua sessão venceu/);
 });
 
-test('aplica comissão promocional de 5% no plano Entrega ObraExpress', () => {
+test('aplica comissão promocional de 5% no plano Entrega ObraMobi', () => {
   const calculo = calcularFinanceiroPedido({
     totalProdutos: 100,
     taxaEntrega: 10,
@@ -213,7 +213,7 @@ test('muda a comissão promocional de 5% para 7% após cinco meses', () => {
   assert.equal(calcularPercentualPromocional('2026-01-01T00:00:00Z', new Date('2026-08-03T00:00:00Z')), 7);
 });
 
-test('plano antigo ou inválido migra para Entrega ObraExpress', () => {
+test('plano antigo ou inválido migra para Entrega ObraMobi sem alterar o identificador interno', () => {
   assert.equal(normalizarPlanoLoja('comissao'), 'entrega_obraexpress');
   assert.equal(normalizarPlanoLoja('loja'), 'loja');
 });
@@ -308,7 +308,7 @@ test('Pix de teste não gera código bancário real e expira em 30 minutos', () 
   const agora = new Date('2026-08-07T18:00:00Z');
   const pagamento = criarReferenciaPagamentoTeste({pedidoId: 7, valor: 23.75, agora, nonce:'ABC123'});
   assert.equal(pagamento.provedor, 'mock');
-  assert.match(pagamento.pixCopiaCola, /^OBRAEXPRESS\.TESTE\|PEDIDO=7\|VALOR=23\.75/);
+  assert.match(pagamento.pixCopiaCola, /^OBRAMOBI\.TESTE\|PEDIDO=7\|VALOR=23\.75/);
   assert.equal(pagamento.expiraEm.toISOString(), '2026-08-07T18:30:00.000Z');
   assert.equal(pagamentoExpirado({status:'aguardando', expira_em:'2026-08-07T18:29:59.000Z'}, agora), false);
   assert.equal(pagamentoExpirado({status:'aguardando', expira_em:'2026-08-07T17:59:59.000Z'}, agora), true);
@@ -362,14 +362,31 @@ test('painéis mostram avisos, estoque real e rastreamento protegido', () => {
   assert.match(entregador, /status_cadastro==='aprovado'\)iniciarGPS/);
 });
 
-test('PWA usa cache v12 e ícones que realmente existem', () => {
+test('PWA usa cache v13 da ObraMobi e ícones que realmente existem', () => {
   const raiz = path.join(__dirname, '..');
   const sw = fs.readFileSync(path.join(raiz, 'frontend', 'sw.js'), 'utf8');
   const manifest = JSON.parse(fs.readFileSync(path.join(raiz, 'frontend', 'manifest.json'), 'utf8'));
-  assert.match(sw, /obraexpress-v12-preproducao-segura/);
+  assert.match(sw, /obramobi-v13-marca-seguranca/);
   for (const icon of manifest.icons) {
     assert.equal(fs.existsSync(path.join(raiz, 'frontend', icon.src.replace(/^\//, ''))), true, `ícone ausente: ${icon.src}`);
   }
+});
+
+test('marca pública é ObraMobi e identificadores antigos continuam compatíveis', () => {
+  const raiz = path.join(__dirname, '..');
+  const cliente = fs.readFileSync(path.join(raiz, 'frontend', 'index.html'), 'utf8');
+  const loja = fs.readFileSync(path.join(raiz, 'loja', 'index.html'), 'utf8');
+  const entregador = fs.readFileSync(path.join(raiz, 'entregador', 'index.html'), 'utf8');
+  const admin = fs.readFileSync(path.join(raiz, 'admin', 'index.html'), 'utf8');
+  const manifest = JSON.parse(fs.readFileSync(path.join(raiz, 'frontend', 'manifest.json'), 'utf8'));
+  const servidor = fs.readFileSync(path.join(raiz, 'server.js'), 'utf8');
+
+  assert.equal(manifest.name, 'ObraMobi');
+  for (const painel of [cliente, loja, entregador, admin]) assert.match(painel, /ObraMobi/);
+  assert.match(servidor, /ObraMobi rodando na porta/);
+  assert.match(cliente, /obraexpress_cliente/);
+  assert.match(admin, /obraexpress_admin_token/);
+  assert.match(loja, /value="entrega_obraexpress"/);
 });
 
 test('limpeza de teste exige confirmação dupla e preserva configurações', () => {

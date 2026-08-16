@@ -1,7 +1,7 @@
 {
-  "name": "obraexpress-api",
-  "version": "12.0.0",
-  "description": "ObraExpress - Marketplace de Materiais de Construção",
+  "name": "obramobi-api",
+  "version": "13.0.0",
+  "description": "ObraMobi - Marketplace de produtos leves para construção",
   "license": "UNLICENSED",
   "main": "server.js",
   "engines": {

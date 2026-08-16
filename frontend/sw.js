@@ -1,4 +1,4 @@
-const CACHE = 'obraexpress-v12-preproducao-segura';
+const CACHE = 'obramobi-v13-marca-seguranca';
 const urls = ['/', '/loja/', '/entregador/', '/admin/', '/termos.html', '/privacidade.html', '/manifest.json'];
 
 self.addEventListener('install', e => {

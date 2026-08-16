@@ -1,12 +1,12 @@
 # Publicação segura no Render
 
-Esta versão do ObraExpress usa **somente PostgreSQL**. Ela não cria um arquivo
+Esta versão da ObraMobi usa **somente PostgreSQL**. Ela não cria um arquivo
 SQLite local. Se `DATABASE_URL` estiver ausente ou inválida, o servidor encerra
 com uma mensagem clara para impedir gravações temporárias.
 
 ## 1. Conferir o PostgreSQL
 
-1. No painel do Render, abra o banco PostgreSQL usado pelo ObraExpress.
+1. No painel do Render, abra o banco PostgreSQL usado pela ObraMobi.
 2. Confirme que o banco e o Web Service estão na mesma região.
 3. No menu **Connect**, copie a **Internal Database URL**.
 4. Não publique nem envie essa URL para outras pessoas.
@@ -31,7 +31,7 @@ com uma mensagem clara para impedir gravações temporárias.
 11. Crie `TRUST_PROXY` com o valor `1`.
 12. Para ativar **Esqueci minha senha**, crie também:
    - `RESEND_API_KEY`: chave secreta de envio criada no painel da Resend;
-   - `EMAIL_FROM`: remetente de um domínio verificado, por exemplo `ObraExpress <nao-responda@seudominio.com>`.
+   - `EMAIL_FROM`: remetente de um domínio verificado, por exemplo `ObraMobi <nao-responda@email.obramobi.com.br>`.
 13. Use `npm ci` como **Build Command**.
 14. Use `npm start` como **Start Command**.
 15. Salve escolhendo a opção que também inicia um novo deploy.
@@ -47,7 +47,7 @@ Depois do deploy, os logs devem mostrar as duas mensagens:
 
 ```text
 ✅ PostgreSQL conectado; tabelas e migrações verificadas
-🚀 ObraExpress rodando na porta 10000
+🚀 ObraMobi rodando na porta 10000
 ```
 
 Se aparecer uma mensagem informando que uma variável não está configurada, ela

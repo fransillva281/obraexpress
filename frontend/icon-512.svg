@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="ObraExpress">
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="ObraMobi">
   <rect width="512" height="512" rx="96" fill="#E65100"/>
   <circle cx="256" cy="256" r="172" fill="#ffffff" opacity="0.12"/>
-  <text x="256" y="323" font-family="Arial, sans-serif" font-size="250" font-weight="700" text-anchor="middle" fill="#ffffff">OE</text>
+  <text x="256" y="323" font-family="Arial, sans-serif" font-size="250" font-weight="700" text-anchor="middle" fill="#ffffff">OM</text>
 </svg>

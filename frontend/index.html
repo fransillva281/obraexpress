@@ -3,11 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>ObraExpress - Materiais de Construção</title>
+<title>ObraMobi - Produtos leves para sua obra</title>
 <link rel="manifest" href="/manifest.json">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="ObraExpress">
+<meta name="apple-mobile-web-app-title" content="ObraMobi">
 <link rel="apple-touch-icon" href="/icon-192.svg">
 <style>
 *{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
@@ -178,7 +178,7 @@ body{background:linear-gradient(180deg,#F7FAFB 0%,var(--bg) 45%);color:var(--tex
       <div class="hero-main">
         <div>
           <span class="hero-kicker">⚡ Entrega rápida para sua obra</span>
-          <h1>ObraExpress</h1>
+          <h1>ObraMobi</h1>
           <p>Encontre produtos leves, compare preços entre lojas e receba com praticidade.</p>
         </div>
         <div class="hero-mark">🛵</div>
@@ -410,7 +410,7 @@ body{background:linear-gradient(180deg,#F7FAFB 0%,var(--bg) 45%);color:var(--tex
 
 <div id="page-termos" class="pages">
   <div class="header"><div class="header-row"><button class="back" onclick="navigate('home')">‹</button><h1>📜 Termos e Regras</h1></div></div>
-  <iframe class="legal-frame" src="/termos.html?perfil=cliente" title="Termos, regras e privacidade da ObraExpress"></iframe>
+  <iframe class="legal-frame" src="/termos.html?perfil=cliente" title="Termos, regras e privacidade da ObraMobi"></iframe>
 </div>
 
 <!-- ============ BOTTOM NAV ============ -->
@@ -427,7 +427,7 @@ body{background:linear-gradient(180deg,#F7FAFB 0%,var(--bg) 45%);color:var(--tex
 <div id="legal-modal" class="legal-modal" role="dialog" aria-modal="true" aria-labelledby="legal-modal-title">
   <div class="legal-modal-card">
     <h2 id="legal-modal-title">📜 Leia para continuar</h2>
-    <p>A ObraExpress atualizou os documentos. Abra o texto completo, leia as regras do cliente e marque as duas confirmações.</p>
+    <p>A ObraMobi atualizou os documentos. Abra o texto completo, leia as regras do cliente e marque as duas confirmações.</p>
     <a class="btn btn-secondary" href="/termos.html?perfil=cliente" target="_blank" rel="noopener">Abrir documento completo</a>
     <label class="legal-check"><input type="checkbox" id="legal-aceite-termos"> <span>Li e aceito os Termos de Uso e as Regras do Cliente.</span></label>
     <label class="legal-check"><input type="checkbox" id="legal-aceite-privacidade"> <span>Li a Política de Privacidade e entendi o uso dos meus dados e do GPS.</span></label>
@@ -1035,7 +1035,7 @@ function mostrarPixTeste(pagamento) {
         <label for="pix-copia-cola-teste" style="display:block;text-align:left;font-size:13px;font-weight:700;margin-bottom:6px">Código de demonstração</label>
         <textarea id="pix-copia-cola-teste" readonly>${escaparHtml(pagamento.pix_copia_cola || '')}</textarea>
         <button class="btn btn-primary" onclick="copiarPixTeste()">📋 Copiar código de teste</button>
-        <div class="aviso"><strong>Não tente pagar pelo aplicativo do banco.</strong><br>Esse QR Code foi criado somente para testar o funcionamento do ObraExpress.</div>
+        <div class="aviso"><strong>Não tente pagar pelo aplicativo do banco.</strong><br>Esse QR Code foi criado somente para testar o funcionamento da ObraMobi.</div>
         <div id="status-pix-teste" style="font-size:14px;font-weight:700;color:var(--laranja)">⏳ Aguardando o administrador confirmar no painel...</div>
         <div style="font-size:12px;color:var(--texto-sec);margin-top:8px">Validade: ${expiracao}</div>
       </div>

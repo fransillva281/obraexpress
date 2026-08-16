@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>ObraExpress - Admin</title>
+<title>ObraMobi - Admin</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
 :root{--laranja:#E65100;--laranja-escuro:#BF360C;--bg:#F5F5F5;--branco:#fff;--texto:#212121;--texto-sec:#757575;--verde:#2E7D32;--vermelho:#C62828}
@@ -52,7 +52,7 @@ body{background:var(--bg);color:var(--texto)}
 <body>
 
 <div class="header">
-  <h1>👑 ObraExpress Admin</h1>
+  <h1>👑 ObraMobi Admin</h1>
   <div class="sub">Painel de controle da plataforma</div>
 </div>
 
@@ -169,8 +169,8 @@ body{background:var(--bg);color:var(--texto)}
         <div style="margin:16px 0 10px;border-top:1px solid var(--borda);padding-top:14px"><strong>🛒 Pedido mínimo e receita</strong></div>
         <div class="form-group"><label>Pedido mínimo em produtos (R$)</label><input type="number" id="cfg-pedido-minimo" min="0" step="0.01"></div>
         <div class="form-group"><label>Até qual valor é pedido pequeno (R$)</label><input type="number" id="cfg-limite-pedido-pequeno" min="0" step="0.01"></div>
-        <div class="form-group"><label>Taxa de pedido pequeno para a ObraExpress (R$)</label><input type="number" id="cfg-taxa-pedido-pequeno" min="0" step="0.01"></div>
-        <p class="info" style="margin-bottom:12px">O servidor impede pedidos abaixo do mínimo. A taxa é mostrada claramente ao cliente e creditada à ObraExpress somente quando o pedido é concluído.</p>
+        <div class="form-group"><label>Taxa de pedido pequeno para a ObraMobi (R$)</label><input type="number" id="cfg-taxa-pedido-pequeno" min="0" step="0.01"></div>
+        <p class="info" style="margin-bottom:12px">O servidor impede pedidos abaixo do mínimo. A taxa é mostrada claramente ao cliente e creditada à ObraMobi somente quando o pedido é concluído.</p>
         <div class="form-group"><label>Condição climática atual</label><select id="cfg-clima"><option value="normal">☀️ Normal</option><option value="chuva">🌧️ Chuva — aplicar adicional</option><option value="perigoso">⚠️ Perigoso — pausar entregas</option></select></div>
         <div class="form-group"><label>Entregas</label><select id="cfg-entregas"><option value="1">✅ Ativas</option><option value="0">⛔ Pausadas</option></select></div>
         <button class="btn btn-primary" onclick="salvarConfiguracoesEntrega()">Salvar configuração de entrega</button>
@@ -364,7 +364,7 @@ async function carregarPedidos(status) {
       <div class="info">👤 ${p.cliente_nome}${p.entregador_nome ? ' • 🛵 '+p.entregador_nome : ' • ⏳ Sem entregador'} • R$ ${p.total_final.toFixed(2)} • ${p.data_pedido}</div>
       <div class="info">Produtos: R$ ${Number(p.total_produtos||0).toFixed(2)} • Comissão loja: R$ ${Number(p.valor_comissao_loja||0).toFixed(2)} • Líquido loja: R$ ${Number(p.valor_liquido_loja||0).toFixed(2)}</div>
       ${p.pagamento_status ? `<div class="info">💠 Pix: <strong>${p.pagamento_status}</strong>${p.pagamento_provedor==='mock'?' • ambiente de teste':''}</div>` : ''}
-      ${Number(p.taxa_pedido_pequeno||0) ? `<div class="info">Taxa de pedido pequeno para a ObraExpress: R$ ${Number(p.taxa_pedido_pequeno).toFixed(2)}</div>` : ''}
+      ${Number(p.taxa_pedido_pequeno||0) ? `<div class="info">Taxa de pedido pequeno para a ObraMobi: R$ ${Number(p.taxa_pedido_pequeno).toFixed(2)}</div>` : ''}
       ${p.status==='aguardando_pagamento' && p.pagamento_status==='aguardando' ? `<button class="btn btn-sm btn-primary" onclick="simularPagamentoTeste(${p.id})">🧪 Confirmar Pix de teste</button>` : ''}
     </div>
   `).join('');
@@ -391,7 +391,7 @@ async function carregarFinanceiro() {
           <span><strong>🛵 ${e.entregador_nome}</strong></span>
           <span style="color:var(--verde);font-weight:700">R$ ${e.saldo.toFixed(2)}</span>
         </div>
-        <div class="info">💰 Total ganho: R$ ${e.total_ganho.toFixed(2)} • Taxa ObraExpress: ${Number(e.comissao_percentual||5).toFixed(0)}% • Pix: ${e.chave_pix || 'Não cadastrou'}</div>
+        <div class="info">💰 Total ganho: R$ ${e.total_ganho.toFixed(2)} • Taxa ObraMobi: ${Number(e.comissao_percentual||5).toFixed(0)}% • Pix: ${e.chave_pix || 'Não cadastrou'}</div>
       </div>
     `).join('');
   }
@@ -402,7 +402,7 @@ async function carregarFinanceiro() {
         <span><strong>🏪 ${l.loja_nome}</strong></span>
         <span style="color:var(--verde);font-weight:700">R$ ${Number(l.saldo||0).toFixed(2)}</span>
       </div>
-      <div class="info">Plano: ${l.plano==='loja'?'Loja — entrega própria':'Entrega ObraExpress'} • Comissão: ${Number(l.comissao_percentual||5).toFixed(0)}% • Pix: ${l.chave_pix || 'Não cadastrou'}</div>
+      <div class="info">Plano: ${l.plano==='loja'?'Loja — entrega própria':'Entrega ObraMobi'} • Comissão: ${Number(l.comissao_percentual||5).toFixed(0)}% • Pix: ${l.chave_pix || 'Não cadastrou'}</div>
     </div>
   `).join('') || '<div class="info">Nenhuma loja com venda concluída.</div>';
   

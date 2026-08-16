@@ -15,9 +15,10 @@ Marque um item somente depois de testar e guardar a comprovação.
 
 ## 2. Marca e domínio
 
-- [ ] Escolher uma marca disponível.
-- [ ] Pesquisar a marca no INPI com orientação adequada.
-- [ ] Registrar domínio próprio.
+- [x] Escolher a marca ObraMobi.
+- [x] Fazer pesquisa pública inicial por `OBRAMOBI` e `OBRA MOBI` no INPI.
+- [x] Registrar `obramobi.com.br` por um ano.
+- [ ] Solicitar o registro da marca no INPI com enquadramento adequado.
 - [ ] Configurar HTTPS e endereços oficiais.
 
 ## 3. Comunicação e contas

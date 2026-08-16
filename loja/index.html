@@ -3,11 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>ObraExpress - Painel da Loja</title>
+<title>ObraMobi - Painel da Loja</title>
 <link rel="manifest" href="/manifest.json">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="ObraExpress Loja">
+<meta name="apple-mobile-web-app-title" content="ObraMobi Loja">
 <link rel="apple-touch-icon" href="/icon-192.svg">
 <style>
 *{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
@@ -52,7 +52,7 @@ body{background:var(--bg);color:var(--texto)}
 <div id="toast" class="toast"></div>
 
 <div id="page-login" class="pages active" style="display:block">
-  <div class="header"><h1>🏪 ObraExpress - Loja</h1><div class="sub">Painel do vendedor</div></div>
+  <div class="header"><h1>🏪 ObraMobi - Loja</h1><div class="sub">Painel do vendedor</div></div>
   <div style="padding:24px 16px">
     <div id="login-form">
       <div class="form-group"><label>Email</label><input type="email" id="login-email" placeholder="loja@email.com"></div>
@@ -76,7 +76,7 @@ body{background:var(--bg);color:var(--texto)}
       <div class="form-group"><button type="button" class="btn btn-primary" onclick="capturarLocalizacaoCadastroLoja()">📍 Marcar localização da loja</button><div id="cad-gps-loja-status" class="meta" style="margin-top:6px">Obrigatório para calcular o frete e guiar o entregador.</div></div>
       <div class="form-group"><label>Chave Pix (para receber)</label><input type="text" id="cad-pix" placeholder="CPF, email, telefone ou chave aleatória"></div>
       <div class="form-group"><label>Categorias atendidas pela loja</label><div id="cad-categorias-list" class="category-options">Carregando categorias...</div></div>
-      <div class="form-group"><label>Plano da loja — 5% nos primeiros 5 meses; depois 7%</label><select id="cad-plano"><option value="entrega_obraexpress">🛵 Entrega ObraExpress — nossos entregadores</option><option value="loja">🏪 Plano Loja — a própria loja entrega</option></select></div>
+      <div class="form-group"><label>Plano da loja — 5% nos primeiros 5 meses; depois 7%</label><select id="cad-plano"><option value="entrega_obraexpress">🛵 Entrega ObraMobi — nossos entregadores</option><option value="loja">🏪 Plano Loja — a própria loja entrega</option></select></div>
       <div class="form-group"><label>Tempo de preparo</label><input type="text" id="cad-tempo" value="30-60 min" placeholder="Ex: 30-60 min"></div>
       <div class="form-group"><label>Descrição</label><textarea id="cad-descricao" placeholder="Fale sobre sua loja..."></textarea></div>
       <div class="form-group"><label>Senha</label><input type="password" id="cad-senha" placeholder="Crie uma senha"></div>
@@ -376,8 +376,8 @@ async function carregarPedidosLoja(){
       <div class="total">R$ ${p.total_final.toFixed(2)}</div>
       <div class="finance-box">
         Produtos: R$ ${Number(p.total_produtos||0).toFixed(2)}<br>
-        ${Number(p.taxa_pedido_pequeno||0) ? `Taxa de pedido pequeno (ObraExpress): R$ ${Number(p.taxa_pedido_pequeno).toFixed(2)}<br>` : ''}
-        Comissão ObraExpress (${Number(p.comissao_loja_percentual||5).toFixed(0)}%): - R$ ${Number(p.valor_comissao_loja||0).toFixed(2)}<br>
+        ${Number(p.taxa_pedido_pequeno||0) ? `Taxa de pedido pequeno (ObraMobi): R$ ${Number(p.taxa_pedido_pequeno).toFixed(2)}<br>` : ''}
+        Comissão ObraMobi (${Number(p.comissao_loja_percentual||5).toFixed(0)}%): - R$ ${Number(p.valor_comissao_loja||0).toFixed(2)}<br>
         <strong>Líquido da loja: R$ ${Number(p.valor_liquido_loja||0).toFixed(2)}</strong>
       </div>
       
@@ -411,7 +411,7 @@ async function carregarPedidosLoja(){
         <button class="btn btn-sm btn-success" onclick="iniciarEntregaLoja(${p.id})">🚚 Saiu para entrega da loja</button>
       `:''}
       ${p.status==='separado' && p.tipo_entrega==='entrega' && p.plano_loja!=='loja'?`
-        <div class="meta" style="color:var(--azul)">🕐 Aguardando entregador ObraExpress aceitar...</div>
+        <div class="meta" style="color:var(--azul)">🕐 Aguardando entregador ObraMobi aceitar...</div>
       `:''}
       ${p.status==='saiu_entrega' && p.plano_loja==='loja'?`
         <button class="btn btn-sm btn-success" onclick="finalizarPedidoLoja(${p.id},false)">✅ Marcar como entregue</button>
@@ -535,7 +535,7 @@ async function carregarPerfilLoja(){
   const dados=await api('/api/lojas/'+loja.id);
   if(dados.loja){loja={...loja,...dados.loja};localStorage.setItem('loja',JSON.stringify(loja));}
   const el=document.getElementById('dash-perfil');
-  const nomePlano=loja.plano==='loja'?'Plano Loja — entrega própria':'Entrega ObraExpress';
+  const nomePlano=loja.plano==='loja'?'Plano Loja — entrega própria':'Entrega ObraMobi';
   el.innerHTML=`
     <div class="card">
       <h3>🏪 ${loja.nome}</h3>
@@ -546,7 +546,7 @@ async function carregarPerfilLoja(){
         ${loja.latitude&&loja.longitude?'✅ GPS da loja cadastrado':'⚠️ GPS da loja não cadastrado. Sem ele o cliente não consegue pedir entrega.'}
         <button class="btn btn-primary btn-sm" onclick="atualizarLocalizacaoLoja()">📍 ${loja.latitude&&loja.longitude?'Atualizar':'Cadastrar'} localização da loja</button>
       </div>
-      <div class="form-group" style="padding:0;margin-top:10px"><label>Plano para os próximos pedidos</label><select id="perfil-plano"><option value="entrega_obraexpress" ${loja.plano!=='loja'?'selected':''}>🛵 Entrega ObraExpress</option><option value="loja" ${loja.plano==='loja'?'selected':''}>🏪 A própria loja entrega</option></select></div>
+      <div class="form-group" style="padding:0;margin-top:10px"><label>Plano para os próximos pedidos</label><select id="perfil-plano"><option value="entrega_obraexpress" ${loja.plano!=='loja'?'selected':''}>🛵 Entrega ObraMobi</option><option value="loja" ${loja.plano==='loja'?'selected':''}>🏪 A própria loja entrega</option></select></div>
       <button class="btn btn-primary btn-sm" onclick="alterarPlanoLoja()">Salvar plano</button>
     </div>
     <div class="card" id="financeiro-loja"><h3>💰 Financeiro</h3><div class="meta">Carregando...</div></div>

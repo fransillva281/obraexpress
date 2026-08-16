@@ -29,7 +29,8 @@ test('status reconhece somente configurações completas', () => {
   assert.equal(incompleto.asaas_sandbox_configured, false);
 
   const completo = getProductionReadiness({
-    PUBLIC_URL: 'https://app.exemplo.com.br',
+    OFFICIAL_DOMAIN: 'obramobi.com.br',
+    PUBLIC_URL: 'https://app.obramobi.com.br',
     RESEND_API_KEY: 'teste',
     EMAIL_FROM: 'App <nao-responda@app.exemplo.com.br>',
     ASAAS_ENV: 'sandbox',
@@ -39,6 +40,15 @@ test('status reconhece somente configurações completas', () => {
   assert.equal(completo.email_configured, true);
   assert.equal(completo.custom_domain_configured, true);
   assert.equal(completo.asaas_sandbox_configured, true);
+});
+
+test('não aceita domínio alheio como domínio oficial da ObraMobi', () => {
+  const status = getProductionReadiness({
+    OFFICIAL_DOMAIN: 'obramobi.com.br',
+    PUBLIC_URL: 'https://site-nao-oficial.example'
+  });
+  assert.equal(status.custom_domain_configured, false);
+  assert.equal(status.official_domain, 'obramobi.com.br');
 });
 
 test('rota sensível de pedido usa middleware compartilhado', () => {

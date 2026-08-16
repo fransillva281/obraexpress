@@ -62,8 +62,8 @@ const ADMIN_PASSWORD = requireEnvironment('ADMIN_PASSWORD');
 const PAYMENT_MODE = process.env.PAYMENT_MODE || 'mock';
 const RUNTIME_SAFETY = assertSafeRuntime(process.env);
 
-const TERMOS_VERSION = '2026-08-12.1';
-const PRIVACIDADE_VERSION = '2026-08-12.1';
+const TERMOS_VERSION = '2026-08-16.1';
+const PRIVACIDADE_VERSION = '2026-08-16.1';
 const STATUS_CADASTRO = Object.freeze({
   PENDENTE: 'pendente',
   APROVADO: 'aprovado',
@@ -388,7 +388,7 @@ app.get('/api/health', async (req, res) => {
       app_stage: RUNTIME_SAFETY.stage,
       payment_mode: RUNTIME_SAFETY.payment_mode,
       moves_real_money: false,
-      version: '12.0.0-preproduction'
+      version: '13.0.0-preproduction'
     });
   } catch (error) {
     res.status(503).json({ status: 'error', database: 'postgresql' });
@@ -792,7 +792,7 @@ app.get('/api/privacidade/verificacao-identidade', authQualquer, async (req, res
     aplicavel: true,
     coleta_biometrica_ativa: false,
     status: verificacao?.status || 'nao_iniciada',
-    aviso: 'O ObraExpress ainda não recebe CNH, selfies ou biometria. A validação será ativada somente com provedor especializado e armazenamento privado.',
+    aviso: 'A ObraMobi ainda não recebe CNH, selfies ou biometria. A validação será ativada somente com provedor especializado e armazenamento privado.',
     verificacao: verificacao || null
   });
 });
@@ -1760,7 +1760,7 @@ app.put('/api/pedidos/:id/iniciar-entrega-loja', authLojas, exigirCadastroAprova
   if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado' });
   if (pedido.loja_id != req.usuario.id) return res.status(403).json({ error: 'Esse pedido não é da sua loja' });
   if (normalizarPlanoLoja(pedido.plano_loja) !== 'loja' || pedido.tipo_entrega !== 'entrega') {
-    return res.status(400).json({ error: 'Este pedido usa entrega ObraExpress ou retirada' });
+    return res.status(400).json({ error: 'Este pedido usa entrega ObraMobi ou retirada' });
   }
   if (pedido.status !== 'separado') return res.status(400).json({ error: 'O pedido precisa estar separado' });
   await dbRun("UPDATE pedidos SET status = 'saiu_entrega', data_saida = CURRENT_TIMESTAMP WHERE id = ?", [req.params.id]);
@@ -2583,5 +2583,5 @@ app.get('*', (req, res) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 ObraExpress rodando na porta ${PORT}`);
+  console.log(`🚀 ObraMobi rodando na porta ${PORT}`);
 });

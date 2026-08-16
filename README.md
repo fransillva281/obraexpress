@@ -1,6 +1,8 @@
-# ObraExpress
+# ObraMobi
 
-Marketplace em desenvolvimento para produtos leves de construção, com painéis de cliente, loja, entregador e administração.
+Marketplace em desenvolvimento para produtos leves de construção, com painéis de cliente, loja, entregador e administração. O projeto se chamava ObraExpress e adotou a marca pública ObraMobi em agosto de 2026.
+
+Domínio adquirido: `obramobi.com.br`. O DNS ainda será configurado; durante essa etapa, os links de teste do Render continuam válidos.
 
 > **Situação atual:** versão de pré-produção para testes. O Pix é uma simulação e não movimenta dinheiro. Não cadastre documentos reais nem use a plataforma com clientes reais antes de concluir o checklist de lançamento.
 
@@ -43,4 +45,4 @@ Esta versão aceita apenas:
 
 Se alguém tentar ligar pagamento real somente alterando uma variável, o servidor é bloqueado. A ativação real exigirá outra versão revisada, conta empresarial homologada, webhook seguro e testes do Asaas.
 
-Consulte [CHECKLIST_LANCAMENTO.md](CHECKLIST_LANCAMENTO.md) e [PREPRODUCAO_V12.md](PREPRODUCAO_V12.md).
+Consulte [CHECKLIST_LANCAMENTO.md](CHECKLIST_LANCAMENTO.md), [PREPRODUCAO_V12.md](PREPRODUCAO_V12.md) e [PREPRODUCAO_V13.md](PREPRODUCAO_V13.md).
